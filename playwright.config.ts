@@ -5,6 +5,9 @@ export default defineConfig({
   timeout: 60_000,
   workers: 1,
   retries: process.env.CI ? 1 : 0,
-  reporter: [['list']],
+  reporter: process.env.CI
+    ? [['list'], ['html', { open: 'never', outputFolder: 'test-results/html' }]]
+    : [['list']],
+  use: { trace: 'retain-on-failure', screenshot: 'only-on-failure' },
   outputDir: 'test-results/playwright',
 })
