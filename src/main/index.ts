@@ -1,18 +1,54 @@
-import { join } from 'node:path'
-import { app, BrowserWindow } from 'electron'
+import { app } from 'electron'
+import { argsFromArgv, HELP_TEXT, parseCli } from './cli'
+import { AppContext } from './context'
+import { registerIpc } from './ipc'
 
-app.whenReady().then(() => {
-  const win = new BrowserWindow({
-    width: 1100,
-    height: 820,
-    webPreferences: {
-      preload: join(__dirname, '../preload/index.js'),
-      contextIsolation: true,
-      sandbox: true,
-      nodeIntegration: false,
-    },
+// Must run before requestSingleInstanceLock: the lock lives in userData.
+if (process.env.RFW_USER_DATA) app.setPath('userData', process.env.RFW_USER_DATA)
+
+const cli = parseCli(argsFromArgv(process.argv, app.isPackaged), process.cwd())
+
+if (cli.kind === 'version') {
+  process.stdout.write(`rf-write ${app.getVersion()}\n`)
+  app.exit(0)
+} else if (cli.kind === 'help') {
+  process.stdout.write(HELP_TEXT)
+  app.exit(0)
+} else if (!app.requestSingleInstanceLock({ paths: cli.paths })) {
+  app.exit(0)
+} else {
+  run(cli.paths)
+}
+
+function isPathsData(data: unknown): data is { paths: string[] } {
+  return (
+    typeof data === 'object' && data !== null && Array.isArray((data as { paths?: unknown }).paths)
+  )
+}
+
+function run(initial: string[]): void {
+  const ctx = new AppContext(app.getPath('userData'), app.getPath('documents'))
+  ctx.openPaths(initial)
+
+  app.on('open-file', (event, path) => {
+    event.preventDefault()
+    ctx.openPaths([path])
   })
-  if (process.env.ELECTRON_RENDERER_URL) void win.loadURL(process.env.ELECTRON_RENDERER_URL)
-  else void win.loadFile(join(__dirname, '../renderer/index.html'))
-})
-app.on('window-all-closed', () => app.quit())
+  app.on('second-instance', (_event, _argv, _cwd, data) => {
+    ctx.openPaths(isPathsData(data) ? data.paths : [])
+    ctx.focus()
+  })
+  app.on('before-quit', () => ctx.markQuitting())
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') app.quit()
+  })
+  app.on('activate', () => {
+    if (!ctx.window) ctx.createWindow()
+  })
+
+  void app.whenReady().then(async () => {
+    await ctx.load()
+    registerIpc(ctx)
+    ctx.createWindow()
+  })
+}
