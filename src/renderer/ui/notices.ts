@@ -12,6 +12,8 @@ function button(label: string, onClick: () => void): HTMLButtonElement {
 }
 
 export class Notices {
+  private readonly banners = new Map<string, HTMLElement>()
+
   constructor(private readonly el: HTMLElement) {}
 
   toast(message: string): void {
@@ -42,7 +44,9 @@ export class Notices {
     this.el.append(p)
   }
 
-  banner(message: string, actions: NoticeAction[]): void {
+  /** A banner with the same key replaces the one already shown for that key. */
+  banner(message: string, actions: NoticeAction[], key?: string): void {
+    if (key !== undefined) this.banners.get(key)?.remove()
     const b = document.createElement('div')
     b.className = 'banner'
     b.setAttribute('role', 'alert')
@@ -53,10 +57,12 @@ export class Notices {
       ...actions.map((a) =>
         button(a.label, () => {
           b.remove()
+          if (key !== undefined && this.banners.get(key) === b) this.banners.delete(key)
           a.run()
         }),
       ),
     )
+    if (key !== undefined) this.banners.set(key, b)
     this.el.append(b)
   }
 }

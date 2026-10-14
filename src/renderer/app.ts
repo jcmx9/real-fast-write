@@ -18,6 +18,8 @@ const INSTALL_HINT = [
   'irm https://raw.githubusercontent.com/jcmx9/real-fast-document/main/scripts/bootstrap.ps1 | iex',
 ].join('\n')
 
+const CONFLICT_ERROR = 'Externe Änderung – bitte im Hinweis entscheiden'
+
 const isMac = navigator.userAgent.includes('Mac')
 
 export interface AppRoot {
@@ -38,7 +40,9 @@ export class App {
   private readonly notices: Notices
   private view: View = 'preview'
   private shownId: number | null = null
-  private saveError: string | null = null
+  private readonly saveErrors = new Map<number, string>()
+  private readonly conflicts = new Set<number>()
+  private readonly saving = new Map<number, Promise<boolean>>()
   private sessionTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(private readonly root: AppRoot) {
@@ -47,7 +51,8 @@ export class App {
       state: createState('', '\n', this.view),
       dispatchTransactions: (trs, view) => {
         view.update(trs)
-        const tab = this.store.active
+        // Route to the tab actually shown, not store.active (which can run ahead of show()).
+        const tab = this.shownId === null ? undefined : this.store.get(this.shownId)
         if (!tab) return
         this.store.updateState(tab.id, view.state)
         if (trs.some((tr) => tr.docChanged)) {
@@ -80,7 +85,9 @@ export class App {
     const startup = await this.rfw.startup()
     this.view = startup.session.view
     for (const t of startup.session.tabs) await this.openPath(t.path, t.headerHidden)
-    this.store.activate(Math.min(startup.session.activeIndex, this.store.all.length - 1))
+    const activePath = startup.session.tabs[startup.session.activeIndex]?.path
+    const activeTab = activePath === undefined ? undefined : this.store.findByPath(activePath)
+    if (activeTab) this.store.activate(this.store.all.indexOf(activeTab))
     for (const p of startup.openPaths) await this.openPath(p)
     if (this.store.all.length === 0) await this.newNote()
     else this.show()
@@ -185,6 +192,9 @@ export class App {
     }
     if (!tab.onDisk) await this.rfw.releasePath(tab.path)
     this.store.close(id)
+    this.saveErrors.delete(id)
+    this.conflicts.delete(id)
+    this.saving.delete(id)
     this.show()
   }
 
@@ -196,7 +206,7 @@ export class App {
     if (!(await this.saveTab(tab, true))) {
       this.notices.panel(
         'Umbenennen nicht möglich',
-        `Die Notiz konnte nicht gespeichert werden:\n${this.saveError ?? ''}`,
+        `Die Notiz konnte nicht gespeichert werden:\n${this.saveErrors.get(tab.id) ?? ''}`,
       )
       return
     }
@@ -215,7 +225,7 @@ export class App {
     if (!(await this.saveTab(tab, true))) {
       this.notices.panel(
         'Export abgebrochen',
-        `Die Notiz konnte nicht gespeichert werden:\n${this.saveError ?? ''}`,
+        `Die Notiz konnte nicht gespeichert werden:\n${this.saveErrors.get(tab.id) ?? ''}`,
       )
       return
     }
@@ -240,18 +250,34 @@ export class App {
   // ── saving ──────────────────────────────────────────────────────────────
 
   /** force: also create a new note's file when it is still empty (rename, export). */
-  private async saveTab(tab: Tab, force = false): Promise<boolean> {
+  private saveTab(tab: Tab, force = false): Promise<boolean> {
+    // Chain per tab so forced saves never overlap an autosave of the same tab.
+    const prev = this.saving.get(tab.id) ?? Promise.resolve(true)
+    const next = prev.then(() => this.writeTab(tab, force))
+    this.saving.set(
+      tab.id,
+      next.catch(() => false),
+    )
+    return next
+  }
+
+  private async writeTab(tab: Tab, force: boolean): Promise<boolean> {
     if (!this.store.isDirty(tab) && (tab.onDisk || !force)) return true
+    if (this.conflicts.has(tab.id)) {
+      this.saveErrors.set(tab.id, CONFLICT_ERROR)
+      this.refresh()
+      return false
+    }
     const doc = tab.state.doc
     const res = await this.rfw.saveNote(tab.path, serializeDoc(doc, tab.eol), tab.bom)
     if (!res.ok) {
-      this.saveError = res.error
+      this.saveErrors.set(tab.id, res.error)
       this.refresh()
       return false
     }
     const firstSave = !tab.onDisk
     this.store.markSaved(tab.id, doc)
-    this.saveError = null
+    this.saveErrors.delete(tab.id)
     if (firstSave) this.syncMain()
     this.refresh()
     return true
@@ -266,8 +292,9 @@ export class App {
   }
 
   private async beforeClose(): Promise<boolean> {
+    const saved = await this.autosave.flush()
     await this.persistSession()
-    if (await this.autosave.flush()) return true
+    if (saved) return true
     const names = this.store.all.filter((t) => this.store.isDirty(t)).map((t) => fileName(t.path))
     return this.rfw.confirmDiscard(names)
   }
@@ -278,13 +305,46 @@ export class App {
     const tab = this.store.findByPath(note.path)
     if (!tab) return
     if (!this.store.isDirty(tab)) {
+      this.clearConflict(tab.id)
       this.reload(tab, note)
       return
     }
-    this.notices.banner(`„${fileName(note.path)}“ wurde außerhalb von rf-write geändert.`, [
-      { label: 'Neu laden (meine Änderungen verwerfen)', run: () => this.reload(tab, note) },
-      { label: 'Meine behalten', run: () => undefined },
-    ])
+    this.conflicts.add(tab.id)
+    this.saveErrors.set(tab.id, CONFLICT_ERROR)
+    this.refresh()
+    this.notices.banner(
+      `„${fileName(note.path)}“ wurde außerhalb von rf-write geändert.`,
+      [
+        {
+          label: 'Neu laden (meine Änderungen verwerfen)',
+          run: () => void this.reloadFromDisk(tab),
+        },
+        {
+          label: 'Meine behalten',
+          run: () => {
+            this.clearConflict(tab.id)
+            this.refresh()
+            this.autosave.touch()
+          },
+        },
+      ],
+      note.path,
+    )
+  }
+
+  private clearConflict(id: number): void {
+    this.conflicts.delete(id)
+    this.saveErrors.delete(id)
+  }
+
+  private async reloadFromDisk(tab: Tab): Promise<void> {
+    const res = await this.rfw.readNote(tab.path)
+    if ('error' in res) {
+      this.notices.panel('Neu laden nicht möglich', `${tab.path}\n\n${res.error}`)
+      return
+    }
+    this.clearConflict(tab.id)
+    this.reload(tab, res)
   }
 
   private reload(tab: Tab, note: NoteFile): void {
@@ -293,7 +353,7 @@ export class App {
     tab.eol = note.eol
     this.store.updateState(tab.id, state)
     this.store.markSaved(tab.id, state.doc)
-    if (this.store.active?.id === tab.id) this.editor.setState(state)
+    if (this.shownId === tab.id) this.editor.setState(state)
     this.refresh()
   }
 
@@ -315,11 +375,12 @@ export class App {
   private refresh(): void {
     const tab = this.store.active
     this.tabBar.render(this.store.all, this.store.activeIndex, (t) => this.store.isDirty(t))
+    const error = tab ? (this.saveErrors.get(tab.id) ?? null) : null
     let state: SaveState = 'saved'
-    if (this.saveError) state = 'error'
+    if (error) state = 'error'
     else if (tab && this.store.isDirty(tab)) state = 'dirty'
     else if (tab && !tab.onDisk) state = 'new'
-    this.status.render(tab ? fileName(tab.path) : null, state, this.saveError)
+    this.status.render(tab ? fileName(tab.path) : null, state, error)
     document.title = tab
       ? `${fileName(tab.path)}${state === 'dirty' ? ' •' : ''} – rf-write`
       : 'rf-write'
