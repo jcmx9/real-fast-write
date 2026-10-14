@@ -28,6 +28,8 @@ const api: RfwApi = {
       let ok = false
       try {
         ok = await cb()
+      } catch (err) {
+        console.error('beforeClose failed', err)
       } finally {
         ipcRenderer.send(Ch.closeReady, ok)
       }

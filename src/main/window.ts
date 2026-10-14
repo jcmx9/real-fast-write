@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { BrowserWindow } from 'electron'
+import { app, BrowserWindow } from 'electron'
 
 export function createMainWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -22,7 +22,8 @@ export function createMainWindow(): BrowserWindow {
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   win.webContents.on('will-navigate', (e) => e.preventDefault())
   win.once('ready-to-show', () => win.show())
-  if (process.env.ELECTRON_RENDERER_URL) void win.loadURL(process.env.ELECTRON_RENDERER_URL)
+  const devUrl = app.isPackaged ? undefined : process.env.ELECTRON_RENDERER_URL
+  if (devUrl) void win.loadURL(devUrl)
   else void win.loadFile(join(__dirname, '../renderer/index.html'))
   return win
 }

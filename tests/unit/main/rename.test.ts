@@ -147,4 +147,39 @@ describe('renameNote', () => {
     expect(await readFile(target, 'utf8')).toBe('T')
     await expect(lstat(from)).rejects.toThrow()
   })
+
+  describe('unlink failure after link', () => {
+    afterEach(() => vi.restoreAllMocks())
+
+    function failUnlink(code: string, times: number) {
+      const real = fsp.unlink.bind(fsp)
+      let left = times
+      return vi.spyOn(fsp, 'unlink').mockImplementation(async (path) => {
+        if (String(path).endsWith('a.md') && left-- > 0) {
+          throw Object.assign(new Error(code), { code })
+        }
+        return real(path)
+      })
+    }
+
+    it('retries a transient EBUSY and completes the rename', async () => {
+      const from = join(dir, 'a.md')
+      await writeFile(from, 'A')
+      failUnlink('EBUSY', 2)
+      const to = await renameNote(from, 'b', async () => undefined)
+      expect(await readFile(to, 'utf8')).toBe('A')
+      await expect(lstat(from)).rejects.toThrow()
+    })
+
+    it('rolls back and throws RenameError when unlink never succeeds', async () => {
+      const from = join(dir, 'a.md')
+      await writeFile(from, 'A')
+      failUnlink('EPERM', Number.POSITIVE_INFINITY)
+      await expect(renameNote(from, 'b', async () => undefined)).rejects.toThrow(
+        /konnte nicht umbenannt werden: Datei ist in Benutzung/,
+      )
+      expect(await readFile(from, 'utf8')).toBe('A')
+      await expect(lstat(join(dir, 'b.md'))).rejects.toThrow()
+    })
+  })
 })

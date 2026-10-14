@@ -20,6 +20,8 @@ const INSTALL_HINT = [
 
 const CONFLICT_ERROR = 'Externe Änderung – bitte im Hinweis entscheiden'
 
+const MAX_SAVE_ROUNDS = 3
+
 const isMac = navigator.userAgent.includes('Mac')
 
 export interface AppRoot {
@@ -202,7 +204,12 @@ export class App {
   private async closeTab(id: number): Promise<void> {
     const tab = this.store.get(id)
     if (!tab) return
-    if (this.store.isDirty(tab) && !(await this.saveTab(tab))) {
+    let saved = true
+    for (let i = 0; i < MAX_SAVE_ROUNDS && this.store.isDirty(tab); i++) {
+      saved = await this.saveTab(tab)
+      if (!saved) break
+    }
+    if (!saved || this.store.isDirty(tab)) {
       if (!(await this.rfw.confirmDiscard([fileName(tab.path)]))) return
     }
     if (!tab.onDisk) {
@@ -232,32 +239,42 @@ export class App {
       )
       return
     }
-    let res: Awaited<ReturnType<typeof this.rfw.renameNote>>
-    try {
-      res = await this.rfw.renameNote(tab.path, name)
-    } catch (e) {
-      res = { ok: false, error: e instanceof Error ? e.message : String(e) }
-    }
+    // Inside the tab's save chain, so an autosave cannot interleave with the rename.
+    const prev = this.saving.get(tab.id) ?? Promise.resolve(true)
+    const renamed = prev.then(async () => {
+      try {
+        const r = await this.rfw.renameNote(tab.path, name)
+        // Switch the path inside the chain: queued saves must target the new file.
+        if (r.ok) this.store.setPath(tab.id, r.path)
+        return r
+      } catch (e) {
+        return { ok: false as const, error: e instanceof Error ? e.message : String(e) }
+      }
+    })
+    this.saving.set(
+      tab.id,
+      renamed.then(() => true),
+    )
+    const res = await renamed
     if (!res.ok) {
       this.notices.panel('Umbenennen nicht möglich', res.error)
       return
     }
-    this.store.setPath(tab.id, res.path)
     this.show()
   }
 
   private async exportPdf(): Promise<void> {
     const tab = this.store.active
     if (!tab || this.status.exporting) return
-    if (!(await this.saveTab(tab, true))) {
-      this.notices.panel(
-        'Export abgebrochen',
-        `Die Notiz konnte nicht gespeichert werden:\n${this.saveErrors.get(tab.id) ?? ''}`,
-      )
-      return
-    }
     this.status.setExporting(true)
     try {
+      if (!(await this.saveTab(tab, true))) {
+        this.notices.panel(
+          'Export abgebrochen',
+          `Die Notiz konnte nicht gespeichert werden:\n${this.saveErrors.get(tab.id) ?? ''}`,
+        )
+        return
+      }
       this.showExport(await this.rfw.exportPdf(tab.path))
     } catch (e) {
       this.notices.panel('Export fehlgeschlagen', e instanceof Error ? e.message : String(e))
@@ -326,8 +343,18 @@ export class App {
   }
 
   private async beforeClose(): Promise<boolean> {
-    const saved = await this.autosave.flush()
-    await this.persistSession()
+    let saved = await this.autosave.flush()
+    // Typing during the save leaves the tab dirty again: save again (bounded).
+    for (let i = 0; i < MAX_SAVE_ROUNDS && this.store.all.some((t) => this.store.isDirty(t)); i++) {
+      saved = await this.saveAll()
+      if (!saved) break
+    }
+    try {
+      await this.persistSession()
+    } catch (e) {
+      // Closing must not depend on the session write.
+      console.error('persistSession failed', e)
+    }
     if (saved) return true
     const names = this.store.all.filter((t) => this.store.isDirty(t)).map((t) => fileName(t.path))
     return this.rfw.confirmDiscard(names)

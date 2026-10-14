@@ -79,6 +79,14 @@ describe('loadJson / saveJson', () => {
     expect((await readFile(file, 'utf8')).endsWith('\n')).toBe(true)
   })
 
+  it('loads valid JSON that starts with a BOM', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'rfw-store-'))
+    const file = join(dir, 'settings.json')
+    await writeFile(file, '\uFEFF{"a":1}')
+    expect(await loadJson(file)).toEqual({ a: 1 })
+    expect(await readdir(dir)).toEqual(['settings.json'])
+  })
+
   it('returns undefined for a missing file', async () => {
     expect(await loadJson(join(tmpdir(), 'rfw-gibt-es-nicht.json'))).toBeUndefined()
   })

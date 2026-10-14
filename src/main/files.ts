@@ -181,8 +181,25 @@ async function sameFile(a: string, b: string): Promise<boolean> {
   return sa.ino === sb.ino && sa.dev === sb.dev
 }
 
+async function unlinkWithRetry(path: string, sleep: AtomicDeps['sleep']): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await fs.unlink(path)
+      return
+    } catch (err) {
+      const code = errorCode(err)
+      if (attempt >= MAX_RETRIES || code === undefined || !RETRY_CODES.has(code)) throw err
+      await sleep(50 * 2 ** attempt)
+    }
+  }
+}
+
 /** Renames in the same folder; never replaces another file. */
-export async function renameNote(from: string, newName: string): Promise<string> {
+export async function renameNote(
+  from: string,
+  newName: string,
+  sleep: AtomicDeps['sleep'] = defaultDeps.sleep,
+): Promise<string> {
   const name = validateNewName(newName)
   const to = join(dirname(from), name)
   if (to === from) return from
@@ -209,7 +226,15 @@ export async function renameNote(from: string, newName: string): Promise<string>
       if (code === undefined || !LINK_UNSUPPORTED.has(code)) throw err
     }
     if (linked) {
-      await fs.unlink(from)
+      try {
+        await unlinkWithRetry(from, sleep)
+      } catch {
+        // Roll back so the note does not exist under two names.
+        await fs.unlink(to).catch(() => undefined)
+        throw new RenameError(
+          `„${basename(from)}“ konnte nicht umbenannt werden: Datei ist in Benutzung.`,
+        )
+      }
       return to
     }
   }

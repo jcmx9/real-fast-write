@@ -76,7 +76,7 @@ export async function loadJson(path: string): Promise<unknown> {
     return undefined
   }
   try {
-    return JSON.parse(raw)
+    return JSON.parse(raw.replace(/^\uFEFF/, ''))
   } catch {
     await fs.rename(path, `${path}.corrupt`).catch(() => undefined)
     return undefined
