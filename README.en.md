@@ -30,6 +30,8 @@ rf-write --version
 rf-write --help
 ```
 
+The `rf-write` command is available after installation (a one-line installer is planned); in development, `npm run dev` starts the app. Settings live in `settings.json` in the app data folder (macOS `~/Library/Application Support/rf-write`, Windows `%APPDATA%\rf-write`, Linux `~/.config/rf-write`).
+
 | Shortcut | Action |
 |----------|--------|
 | Mod+N | New note in the default folder (`YYYY-MM-DD_HH-mm-ss.md`) |

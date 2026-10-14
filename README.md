@@ -30,6 +30,8 @@ rf-write --version
 rf-write --help
 ```
 
+Der Befehl `rf-write` steht nach der Installation zur Verfügung (ein One-Line-Installer ist geplant); in der Entwicklung startet `npm run dev` die App. Die Einstellungen liegen in `settings.json` im App-Datenordner (macOS `~/Library/Application Support/rf-write`, Windows `%APPDATA%\rf-write`, Linux `~/.config/rf-write`).
+
 | Kürzel | Aktion |
 |--------|--------|
 | Mod+N | Neue Notiz im Standardordner (`JJJJ-MM-TT_HH-mm-ss.md`) |

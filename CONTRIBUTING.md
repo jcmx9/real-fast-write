@@ -38,7 +38,7 @@ npm ci
 
 4. Commit with a conventional commit message in English, without AI attribution lines:
    ```
-   feat(editor): add CSV import support
+   feat(editor): add word count
    ```
 
 5. Push and create a PR targeting `dev`.
@@ -58,12 +58,11 @@ Before submitting a PR, verify:
 ## Code Standards
 
 - **TypeScript strict** is required; **Biome** is the only linter/formatter.
-- **Type hints** are required for all public functions and methods.
+- **Explicit types** are required for exported functions and methods.
 - **Test coverage** for new functionality (target: >= 80 %).
 
 ## Issues
 
-- Use the available issue templates.
 - Bug reports should include steps to reproduce.
 - Feature requests should describe the use case, not just the desired solution.
 
