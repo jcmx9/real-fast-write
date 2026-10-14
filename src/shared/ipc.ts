@@ -1,0 +1,18 @@
+export const Ch = {
+  startup: 'rfw:startup',
+  readNote: 'rfw:read-note',
+  newNotePath: 'rfw:new-note-path',
+  releasePath: 'rfw:release-path',
+  saveNote: 'rfw:save-note',
+  renameNote: 'rfw:rename-note',
+  openDialog: 'rfw:open-dialog',
+  exportPdf: 'rfw:export-pdf',
+  saveSession: 'rfw:save-session',
+  watch: 'rfw:watch',
+  confirmDiscard: 'rfw:confirm-discard',
+  menu: 'rfw:menu',
+  openPaths: 'rfw:open-paths',
+  externalChange: 'rfw:external-change',
+  beforeClose: 'rfw:before-close',
+  closeReady: 'rfw:close-ready',
+} as const
