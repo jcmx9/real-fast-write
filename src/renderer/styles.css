@@ -1,0 +1,134 @@
+:root {
+  color-scheme: light;
+  --chrome-bg: #f4f4f2;
+  --chrome-fg: #333;
+  --chrome-muted: #888;
+  --accent: #1f6f6a;
+  --danger: #a4262c;
+  font-family: system-ui, sans-serif;
+  font-size: 13px;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: #fff;
+  color: #222;
+}
+[hidden] {
+  /* biome-ignore lint/complexity/noImportantStyles: author display rules such as #empty must not override [hidden] */
+  display: none !important;
+}
+#app {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100vh;
+}
+#tabbar {
+  display: flex;
+  gap: 2px;
+  padding: 4px 6px 0;
+  background: var(--chrome-bg);
+  overflow-x: auto;
+}
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 6px 6px 0 0;
+  color: var(--chrome-muted);
+  white-space: nowrap;
+  cursor: default;
+}
+.tab.active {
+  background: #fff;
+  color: var(--chrome-fg);
+}
+.tab.dirty .tab-label::after {
+  content: " •";
+  color: var(--accent);
+}
+.tab-close {
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0 2px;
+}
+#workspace {
+  position: relative;
+  min-height: 0;
+}
+#editor,
+#editor .cm-editor {
+  height: 100%;
+}
+#editor .cm-scroller {
+  font-family: ui-monospace, monospace;
+}
+#empty {
+  display: grid;
+  place-content: center;
+  gap: 8px;
+  height: 100%;
+}
+#status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 10px;
+  background: var(--chrome-bg);
+  color: var(--chrome-muted);
+}
+#status .state.error {
+  color: var(--danger);
+  font-weight: 600;
+}
+#status .export {
+  margin-left: auto;
+}
+#notices {
+  position: fixed;
+  top: 40px;
+  right: 12px;
+  display: grid;
+  gap: 8px;
+  max-width: min(560px, 90vw);
+  z-index: 10;
+}
+.toast,
+.panel,
+.banner {
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 8px 12px;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.12);
+}
+.panel h2,
+dialog.prompt h2 {
+  font-size: 14px;
+  margin: 0 0 6px;
+}
+.panel pre {
+  white-space: pre-wrap;
+  max-height: 40vh;
+  overflow: auto;
+  user-select: text;
+}
+.actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+dialog.prompt {
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  min-width: 320px;
+}
+dialog.prompt label {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 8px;
+}
