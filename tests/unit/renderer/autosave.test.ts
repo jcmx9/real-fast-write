@@ -71,4 +71,66 @@ describe('AutosaveScheduler', () => {
     await vi.advanceTimersByTimeAsync(5000)
     expect(save).not.toHaveBeenCalled()
   })
+
+  it('dispose during an in-flight failing save schedules no retry', async () => {
+    const save = vi.fn(() => new Promise<boolean>((r) => setTimeout(() => r(false), 100)))
+    const a = new AutosaveScheduler(save)
+    const pending = a.flush()
+    await vi.advanceTimersByTimeAsync(50)
+    a.dispose()
+    await vi.advanceTimersByTimeAsync(100)
+    expect(await pending).toBe(false)
+    await vi.advanceTimersByTimeAsync(20_000)
+    expect(save).toHaveBeenCalledTimes(1)
+  })
+
+  it('repeated failures retry every 5 s until success, then stop', async () => {
+    const save = vi
+      .fn()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true)
+    const a = new AutosaveScheduler(save, 1000, 5000)
+    expect(await a.flush()).toBe(false)
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(save).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(save).toHaveBeenCalledTimes(3)
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(save).toHaveBeenCalledTimes(4)
+    await vi.advanceTimersByTimeAsync(20_000)
+    expect(save).toHaveBeenCalledTimes(4)
+  })
+
+  it('overlapping failing flushes keep only one retry loop', async () => {
+    const save = vi
+      .fn()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true)
+    const a = new AutosaveScheduler(save, 1000, 5000)
+    const first = a.flush()
+    const second = a.flush()
+    expect(await first).toBe(false)
+    expect(await second).toBe(false)
+    await vi.advanceTimersByTimeAsync(20_000)
+    // Four calls: two overlapping flushes, then one retry loop (fail, then succeed).
+    expect(save).toHaveBeenCalledTimes(4)
+  })
+
+  it('a synchronously throwing save resolves false and does not poison later saves', async () => {
+    const save = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        throw new Error('sync kaputt')
+      })
+      .mockResolvedValueOnce(true)
+    const a = new AutosaveScheduler(save)
+    expect(await a.flush()).toBe(false)
+    expect(await a.flush()).toBe(true)
+    expect(save).toHaveBeenCalledTimes(2)
+    a.dispose()
+  })
 })
