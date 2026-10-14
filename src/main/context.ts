@@ -25,6 +25,10 @@ import {
 import { NoteWatcher } from './watcher'
 import { createMainWindow } from './window'
 
+export function logSessionError(err: unknown): void {
+  console.error('rf-write: Sitzung konnte nicht gespeichert werden', err)
+}
+
 export class AppContext {
   window: BrowserWindow | null = null
   settings: Settings
@@ -37,6 +41,8 @@ export class AppContext {
   private rendererReady = false
   private closeApproved = false
   private quitting = false
+  private initialized = false
+  private sessionWrite: Promise<void> = Promise.resolve()
   private rfDocument: string | null = null
 
   constructor(
@@ -70,9 +76,16 @@ export class AppContext {
     this.rendererReady = false
     this.closeApproved = false
     win.on('close', (e) => {
-      if (this.closeApproved) return
+      // Without a running renderer nobody could answer beforeClose: do not trap the window.
+      if (this.closeApproved || !this.rendererReady) return
       e.preventDefault()
       this.send(Ch.beforeClose)
+    })
+    win.webContents.on('did-start-loading', () => {
+      this.rendererReady = false
+    })
+    win.webContents.on('render-process-gone', () => {
+      this.rendererReady = false
     })
     win.on('closed', () => {
       this.window = null
@@ -86,6 +99,15 @@ export class AppContext {
     return { session: this.session, openPaths: this.pending.splice(0), settings: this.settings }
   }
 
+  /** Called once settings and IPC handlers are ready; windows may be created from then on. */
+  markInitialized(): void {
+    this.initialized = true
+  }
+
+  isInitialized(): boolean {
+    return this.initialized
+  }
+
   /** Opens paths in the renderer now, or queues them until it has started. */
   openPaths(paths: readonly string[]): void {
     if (!paths.length) return
@@ -93,13 +115,14 @@ export class AppContext {
     if (this.window && this.rendererReady) this.send(Ch.openPaths, [...paths])
     else {
       this.pending.push(...paths)
-      if (!this.window && app.isReady()) this.createWindow()
+      if (!this.window && this.initialized) this.createWindow()
     }
   }
 
   focus(): void {
+    if (!this.initialized) return
     if (!this.window) {
-      if (app.isReady()) this.createWindow()
+      this.createWindow()
       return
     }
     if (this.window.isMinimized()) this.window.restore()
@@ -131,7 +154,7 @@ export class AppContext {
       recent: this.session.recent,
       command: (c: MenuCommand) => this.send(Ch.menu, c),
       openRecent: (p) => this.openPaths([p]),
-      clearRecent: () => void this.setRecent([]),
+      clearRecent: () => void this.setRecent([]).catch(logSessionError),
     })
     Menu.setApplicationMenu(Menu.buildFromTemplate(template))
   }
@@ -146,8 +169,15 @@ export class AppContext {
 
   async updateSession(patch: SessionPatch): Promise<void> {
     const tabs = patch.tabs?.filter((t) => this.isAllowed(t.path))
-    this.session = sanitizeSession({ ...this.session, ...patch, ...(tabs ? { tabs } : {}) })
-    await saveJson(this.file('session.json'), this.session)
+    // Copy only whitelisted keys: the renderer must never set e.g. `recent`.
+    const next: Record<string, unknown> = { ...this.session }
+    if (tabs) next.tabs = tabs
+    if (patch.activeIndex !== undefined) next.activeIndex = patch.activeIndex
+    if (patch.mode !== undefined) next.mode = patch.mode
+    if (patch.view !== undefined) next.view = patch.view
+    if (patch.zoom !== undefined) next.zoom = patch.zoom
+    this.session = sanitizeSession(next)
+    await this.persistSession()
   }
 
   async exportPdf(note: string): Promise<ExportResult> {
@@ -190,8 +220,15 @@ export class AppContext {
   private async setRecent(recent: string[]): Promise<void> {
     this.session = { ...this.session, recent }
     this.allow(recent)
-    await saveJson(this.file('session.json'), this.session)
+    await this.persistSession()
     this.installMenu()
+  }
+
+  /** Serializes session.json writes; a failed write does not break the chain. */
+  private persistSession(): Promise<void> {
+    const write = this.sessionWrite.then(() => saveJson(this.file('session.json'), this.session))
+    this.sessionWrite = write.catch(logSessionError)
+    return write
   }
 
   private file(name: string): string {

@@ -1,7 +1,7 @@
 import { BrowserWindow, dialog, ipcMain } from 'electron'
 import { Ch } from '../shared/ipc'
 import type { NoteFile, RenameResult, SaveResult, SessionPatch } from '../shared/types'
-import type { AppContext } from './context'
+import { type AppContext, logSessionError } from './context'
 import { hashBytes, newNotePath, noteBytes, readNote, renameNote, writeNoteBytes } from './files'
 
 const str = (v: unknown): string => {
@@ -19,7 +19,7 @@ export function registerIpc(ctx: AppContext): void {
       ctx.assertAllowed(p)
       const note = await readNote(p)
       ctx.watcher.expect(p, note.hash)
-      void ctx.rememberRecent(p)
+      void ctx.rememberRecent(p).catch(logSessionError)
       return note
     } catch (err) {
       return { error: message(err) }
@@ -47,7 +47,7 @@ export function registerIpc(ctx: AppContext): void {
         const hash = hashBytes(bytes)
         ctx.watcher.expect(p, hash)
         await writeNoteBytes(p, bytes)
-        if (ctx.reserved.delete(p)) void ctx.rememberRecent(p)
+        if (ctx.reserved.delete(p)) void ctx.rememberRecent(p).catch(logSessionError)
         return { ok: true, hash }
       } catch (err) {
         return { ok: false, error: message(err) }

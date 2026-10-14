@@ -35,7 +35,9 @@ function run(initial: string[]): void {
     ctx.openPaths([path])
   })
   app.on('second-instance', (_event, _argv, _cwd, data) => {
-    ctx.openPaths(isPathsData(data) ? data.paths : [])
+    ctx.openPaths(
+      isPathsData(data) ? data.paths.filter((p): p is string => typeof p === 'string') : [],
+    )
     ctx.focus()
   })
   app.on('before-quit', () => ctx.markQuitting())
@@ -43,12 +45,13 @@ function run(initial: string[]): void {
     if (process.platform !== 'darwin') app.quit()
   })
   app.on('activate', () => {
-    if (!ctx.window) ctx.createWindow()
+    if (ctx.isInitialized() && !ctx.window) ctx.createWindow()
   })
 
   void app.whenReady().then(async () => {
     await ctx.load()
     registerIpc(ctx)
-    ctx.createWindow()
+    ctx.markInitialized()
+    if (!ctx.window) ctx.createWindow()
   })
 }
