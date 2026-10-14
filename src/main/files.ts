@@ -166,8 +166,18 @@ export function validateNewName(name: string): string {
   return /\.md$/i.test(trimmed) ? trimmed : `${trimmed}.md`
 }
 
+/** True only when nothing is at `path`; any other lstat error counts as taken. */
+async function isFree(path: string): Promise<boolean> {
+  try {
+    await fs.lstat(path)
+    return false
+  } catch (err) {
+    return errorCode(err) === 'ENOENT'
+  }
+}
+
 async function sameFile(a: string, b: string): Promise<boolean> {
-  const [sa, sb] = await Promise.all([fs.stat(a), fs.stat(b)])
+  const [sa, sb] = await Promise.all([fs.stat(a, { bigint: true }), fs.stat(b, { bigint: true })])
   return sa.ino === sb.ino && sa.dev === sb.dev
 }
 
@@ -179,21 +189,33 @@ export async function renameNote(from: string, newName: string): Promise<string>
   const taken = () => new RenameError(`„${name}“ existiert bereits.`)
 
   if (to.toLowerCase() === from.toLowerCase()) {
-    if ((await exists(to)) && !(await sameFile(from, to))) throw taken()
+    // Case-only rename: `to` may be the same file on a case-insensitive FS.
+    // If sameFile cannot prove identity, refuse.
+    if (!(await isFree(to)) && !(await sameFile(from, to).catch(() => false))) throw taken()
     await fs.rename(from, to)
     return to
   }
-  try {
-    // link() fails with EEXIST instead of replacing: an atomic no-clobber rename.
-    await fs.link(from, to)
-  } catch (err) {
-    const code = errorCode(err)
-    if (code === 'EEXIST') throw taken()
-    if (code === undefined || !LINK_UNSUPPORTED.has(code)) throw err
-    if (await exists(to)) throw taken()
-    await fs.rename(from, to)
-    return to
+  // A symlink must be renamed as a link. link() would follow it on macOS.
+  const isLink = (await fs.lstat(from)).isSymbolicLink()
+  if (!isLink) {
+    let linked = false
+    try {
+      // link() fails with EEXIST instead of replacing: an atomic no-clobber rename.
+      await fs.link(from, to)
+      linked = true
+    } catch (err) {
+      const code = errorCode(err)
+      if (code === 'EEXIST') throw taken()
+      if (code === undefined || !LINK_UNSUPPORTED.has(code)) throw err
+    }
+    if (linked) {
+      await fs.unlink(from)
+      return to
+    }
   }
-  await fs.unlink(from)
+  // Best-effort fallback (check-then-rename, not atomic): used for symlinks and
+  // for filesystems without hard links.
+  if (!(await isFree(to))) throw taken()
+  await fs.rename(from, to)
   return to
 }
