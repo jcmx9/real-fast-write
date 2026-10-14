@@ -45,6 +45,11 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           irm https://raw.githubusercontent.com/jcmx9/real-fast-document/main/scripts/bootstrap.ps1 | iex
+          # winget puts typst on the *user* PATH for new sessions only; a fresh
+          # login would see it, so hand those entries to the following steps.
+          [Environment]::GetEnvironmentVariable("Path", "User") -split ';' |
+            Where-Object { $_ } |
+            ForEach-Object { Add-Content -Path $env:GITHUB_PATH -Value $_ -Encoding ascii }
 
       - name: Prepare Electron on Linux
         if: runner.os == 'Linux'

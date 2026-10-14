@@ -36,7 +36,9 @@ test('exports a real PDF with rf-document', async () => {
   await writeFile(note, '---\ntitle: "E2E"\n---\n\n# Test\n\n- [ ] Aufgabe – Name, bis 17.10.\n')
   const { app, page } = await launch({ dirs, args: [note], env: { RFD_NO_OPEN: '1' } })
   await clickMenu(app, 'export')
-  await expect(page.locator('.toast')).toBeVisible({ timeout: 150_000 })
+  // Wait for either outcome so a failed export reports rf-document's message at once.
+  await expect(page.locator('.toast, .panel').first()).toBeVisible({ timeout: 150_000 })
+  expect(await page.locator('.panel').allTextContents()).toEqual([])
   const pdfs = (await readdir(dirs.notes)).filter((f) => f.endsWith('.pdf'))
   expect(pdfs).toHaveLength(1)
   const head = (await readFile(join(dirs.notes, pdfs[0] as string)))
