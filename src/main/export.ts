@@ -27,12 +27,29 @@ function lastLine(text: string): string {
   )
 }
 
-function killTree(child: ChildProcess): void {
-  if (process.platform === 'win32' && child.pid !== undefined) {
-    spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true })
-  } else {
-    child.kill('SIGTERM')
+const KILL_GRACE_MS = 2000
+
+function signalGroup(pid: number, signal: NodeJS.Signals): void {
+  try {
+    process.kill(-pid, signal)
+  } catch {
+    // The group is already gone; nothing left to signal.
   }
+}
+
+function killTree(child: ChildProcess): void {
+  if (child.pid === undefined) return
+  if (process.platform === 'win32') {
+    const killer = spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true })
+    // A failure to start taskkill must not become an unhandled error in the main process.
+    killer.on('error', () => {})
+    return
+  }
+  // The child leads its own process group (detached), so this reaches the whole tree.
+  const pid = child.pid
+  signalGroup(pid, 'SIGTERM')
+  const escalate = setTimeout(() => signalGroup(pid, 'SIGKILL'), KILL_GRACE_MS)
+  escalate.unref()
 }
 
 /** Runs `rf-document <note>`; rf-document names the PDF, reads front matter options and opens it. */
@@ -42,20 +59,34 @@ export function runRfDocument(
   opts: { timeoutMs?: number } = {},
 ): Promise<ExportResult> {
   const { file, args, verbatim } = buildCommand(bin, note, process.platform)
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
   return new Promise((resolve) => {
     let stdout = ''
     let stderr = ''
-    let timedOut = false
+    let settled = false
+    const finish = (result: ExportResult): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve(result)
+    }
     const child = spawn(file, args, {
       cwd: dirname(note),
       env: process.env,
       windowsHide: true,
       windowsVerbatimArguments: verbatim,
+      detached: process.platform !== 'win32',
     })
     const timer = setTimeout(() => {
-      timedOut = true
       killTree(child)
-    }, opts.timeoutMs ?? DEFAULT_TIMEOUT_MS)
+      const seconds = Math.round(timeoutMs / 1000)
+      finish({
+        kind: 'failed',
+        code: null,
+        stderr:
+          `${stderr.trim()}\nZeitüberschreitung: rf-document wurde nach ${seconds} s abgebrochen.`.trim(),
+      })
+    }, timeoutMs)
     child.stdout?.setEncoding('utf8').on('data', (d: string) => {
       stdout += d
     })
@@ -63,27 +94,17 @@ export function runRfDocument(
       stderr += d
     })
     child.on('error', (err) => {
-      clearTimeout(timer)
-      resolve({
+      finish({
         kind: 'failed',
         code: null,
         stderr: `rf-document konnte nicht gestartet werden: ${err.message}`,
       })
     })
     child.on('close', (code) => {
-      clearTimeout(timer)
-      if (timedOut) {
-        const seconds = Math.round((opts.timeoutMs ?? DEFAULT_TIMEOUT_MS) / 1000)
-        resolve({
-          kind: 'failed',
-          code: null,
-          stderr:
-            `${stderr.trim()}\nZeitüberschreitung: rf-document wurde nach ${seconds} s abgebrochen.`.trim(),
-        })
-      } else if (code === 0) {
-        resolve({ kind: 'ok', message: lastLine(stdout) || 'PDF erzeugt.' })
+      if (code === 0) {
+        finish({ kind: 'ok', message: lastLine(stdout) || 'PDF erzeugt.' })
       } else {
-        resolve({
+        finish({
           kind: 'failed',
           code,
           stderr: stderr.trim() || `rf-document endete mit Code ${code}.`,

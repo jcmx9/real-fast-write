@@ -66,9 +66,12 @@ describe('runRfDocument', () => {
 
   it('kills a hanging process after the timeout', async () => {
     const { bin } = await makeFakeRfDocument(dir, { sleepSeconds: 5 })
+    const started = Date.now()
     const r = await runRfDocument(bin, note, { timeoutMs: 300 })
+    const elapsed = Date.now() - started
     expect(r.kind).toBe('failed')
     if (r.kind === 'failed') expect(r.stderr).toMatch(/Zeitüberschreitung/)
+    expect(elapsed).toBeLessThan(2000)
   })
 
   it.skipIf(process.platform === 'win32')('handles umlauts in the path', async () => {
