@@ -124,6 +124,10 @@ describe('NoteWatcher', () => {
     await writeFile(path, 'x')
     watcher.setFiles([path])
     watcher.expect(path, hashBytes(noteBytes('neu', false)))
+    // Event for the old content, whose hash is still accepted but no longer latest.
+    await writeFile(path, 'x')
+    await sleep(600)
+    expect(changes).toEqual([])
     await writeNote(path, 'neu', false)
     await sleep(600)
     expect(changes).toEqual([])

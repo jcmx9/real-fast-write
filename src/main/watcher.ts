@@ -98,6 +98,8 @@ export class NoteWatcher {
     } catch {
       return
     }
+    // The path may have been removed while the read was in flight.
+    if (!this.files.has(path)) return
     const entry = this.known.get(path)
     if (entry?.latest === note.hash) {
       // Settled on our newest write: only that content is accepted from now on.
