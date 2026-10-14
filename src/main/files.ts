@@ -146,3 +146,54 @@ export async function writeNote(path: string, text: string, bom: boolean): Promi
   await writeNoteBytes(path, bytes)
   return hashBytes(bytes)
 }
+
+// biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are invalid in file names
+const INVALID_NAME = /[<>:"/\\|?*\u0000-\u001f]/
+const LINK_UNSUPPORTED = new Set(['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'ENOSYS'])
+
+export class RenameError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'RenameError'
+  }
+}
+
+export function validateNewName(name: string): string {
+  const trimmed = name.trim()
+  if (trimmed === '' || trimmed === '.' || trimmed === '..' || INVALID_NAME.test(trimmed)) {
+    throw new RenameError(`„${name}“ ist kein gültiger Dateiname.`)
+  }
+  return /\.md$/i.test(trimmed) ? trimmed : `${trimmed}.md`
+}
+
+async function sameFile(a: string, b: string): Promise<boolean> {
+  const [sa, sb] = await Promise.all([fs.stat(a), fs.stat(b)])
+  return sa.ino === sb.ino && sa.dev === sb.dev
+}
+
+/** Renames in the same folder; never replaces another file. */
+export async function renameNote(from: string, newName: string): Promise<string> {
+  const name = validateNewName(newName)
+  const to = join(dirname(from), name)
+  if (to === from) return from
+  const taken = () => new RenameError(`„${name}“ existiert bereits.`)
+
+  if (to.toLowerCase() === from.toLowerCase()) {
+    if ((await exists(to)) && !(await sameFile(from, to))) throw taken()
+    await fs.rename(from, to)
+    return to
+  }
+  try {
+    // link() fails with EEXIST instead of replacing: an atomic no-clobber rename.
+    await fs.link(from, to)
+  } catch (err) {
+    const code = errorCode(err)
+    if (code === 'EEXIST') throw taken()
+    if (code === undefined || !LINK_UNSUPPORTED.has(code)) throw err
+    if (await exists(to)) throw taken()
+    await fs.rename(from, to)
+    return to
+  }
+  await fs.unlink(from)
+  return to
+}
