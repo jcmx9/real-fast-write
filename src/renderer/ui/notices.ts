@@ -16,6 +16,12 @@ export class Notices {
 
   constructor(private readonly el: HTMLElement) {}
 
+  /** Removes the banner registered under key, if any. */
+  dismiss(key: string): void {
+    this.banners.get(key)?.remove()
+    this.banners.delete(key)
+  }
+
   toast(message: string): void {
     const t = document.createElement('div')
     t.className = 'toast'

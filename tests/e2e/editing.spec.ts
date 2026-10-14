@@ -1,4 +1,4 @@
-import { writeFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import { clickMenu, launch, MOD, makeDirs, typeInEditor, waitForFile } from './helpers'
@@ -61,5 +61,24 @@ test('word-wise selection replaces the last word', async () => {
   await page.keyboard.press(`Shift+${MOD === 'Meta' ? 'Alt' : 'Control'}+ArrowLeft`)
   await page.keyboard.type('vier')
   await waitForFile(file, (b) => b.toString('utf8') === 'eins zwei vier')
+  await app.close()
+})
+
+test('select all in the rename dialog acts on the input, not the editor', async () => {
+  const dirs = await makeDirs()
+  const file = join(dirs.notes, 'dialog.md')
+  await writeFile(file, 'Inhalt der Notiz')
+  const { app, page } = await launch({ dirs, args: [file] })
+  await clickMenu(app, 'rename')
+  const input = page.locator('dialog.prompt input')
+  await input.fill('abc')
+  await clickMenu(app, 'select-all')
+  await expect.poll(() => input.evaluate((el: HTMLInputElement) => el.selectionEnd)).toBe(3)
+  await page.keyboard.type('neu')
+  await expect(input).toHaveValue('neu')
+  await page.keyboard.press('Escape')
+  await expect(page.locator('dialog.prompt')).toHaveCount(0)
+  await expect(page.locator('.cm-content')).toContainText('Inhalt der Notiz')
+  expect(await readFile(file, 'utf8')).toBe('Inhalt der Notiz')
   await app.close()
 })

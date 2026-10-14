@@ -119,16 +119,23 @@ export class App {
         this.store.prev()
         return this.show()
       case 'undo':
-        undo(this.editor)
-        return
+        return this.editCommand('undo', undo)
       case 'redo':
-        redo(this.editor)
-        return
+        return this.editCommand('redo', redo)
       case 'select-all':
-        selectAll(this.editor)
-        this.editor.focus()
-        return
+        return this.editCommand('selectAll', selectAll)
     }
+  }
+
+  /** Edit commands go to CodeMirror unless another text field (dialog, panel) has focus. */
+  private editCommand(name: 'undo' | 'redo' | 'selectAll', run: (v: EditorView) => unknown): void {
+    const active = document.activeElement
+    if (this.editor.hasFocus || !active || active === document.body) {
+      run(this.editor)
+      this.editor.focus()
+      return
+    }
+    document.execCommand(name)
   }
 
   private globalKeys(e: KeyboardEvent): void {
@@ -196,6 +203,7 @@ export class App {
     }
     if (!tab.onDisk) await this.rfw.releasePath(tab.path)
     this.store.close(id)
+    this.notices.dismiss(tab.path)
     this.saveErrors.delete(id)
     this.conflicts.delete(id)
     this.saving.delete(id)
@@ -273,7 +281,12 @@ export class App {
       return false
     }
     const doc = tab.state.doc
-    const res = await this.rfw.saveNote(tab.path, serializeDoc(doc, tab.eol), tab.bom)
+    let res: Awaited<ReturnType<typeof this.rfw.saveNote>>
+    try {
+      res = await this.rfw.saveNote(tab.path, serializeDoc(doc, tab.eol), tab.bom)
+    } catch (e) {
+      res = { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
     if (!res.ok) {
       this.saveErrors.set(tab.id, res.error)
       this.refresh()
