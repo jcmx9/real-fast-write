@@ -15,7 +15,16 @@ export class NoteWatcher {
   ) {}
 
   setFiles(paths: readonly string[]): void {
+    const previous = this.files
     this.files = new Set(paths)
+    // Forget removed files so a later re-add re-seeds from disk, not from a stale hash.
+    for (const p of previous) {
+      if (this.files.has(p)) continue
+      this.known.delete(p)
+      const pending = this.timers.get(p)
+      if (pending) clearTimeout(pending)
+      this.timers.delete(p)
+    }
     // Baseline so pre-existing content and creation events are not reported as external changes.
     for (const p of paths) {
       if (this.known.has(p)) continue
