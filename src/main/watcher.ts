@@ -6,7 +6,7 @@ import { hashBytes, readNote } from './files'
 export class NoteWatcher {
   private readonly dirs = new Map<string, FSWatcher>()
   private files = new Set<string>()
-  private readonly known = new Map<string, string>()
+  private readonly known = new Map<string, { accepted: Set<string>; latest: string }>()
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>()
 
   constructor(
@@ -29,7 +29,8 @@ export class NoteWatcher {
     for (const p of paths) {
       if (this.known.has(p)) continue
       try {
-        this.known.set(p, hashBytes(readFileSync(p)))
+        const seed = hashBytes(readFileSync(p))
+        this.known.set(p, { accepted: new Set([seed]), latest: seed })
       } catch {
         // Missing or unreadable (e.g. a new, unsaved note): nothing to baseline.
       }
@@ -60,7 +61,13 @@ export class NoteWatcher {
 
   /** Records the hash of content that is (about to be) on disk, so it is not reported. */
   expect(path: string, hash: string): void {
-    this.known.set(path, hash)
+    const entry = this.known.get(path)
+    if (entry) {
+      entry.accepted.add(hash)
+      entry.latest = hash
+    } else {
+      this.known.set(path, { accepted: new Set([hash]), latest: hash })
+    }
   }
 
   close(): void {
@@ -91,8 +98,14 @@ export class NoteWatcher {
     } catch {
       return
     }
-    if (this.known.get(path) === note.hash) return
-    this.known.set(path, note.hash)
+    const entry = this.known.get(path)
+    if (entry?.latest === note.hash) {
+      // Settled on our newest write: only that content is accepted from now on.
+      entry.accepted = new Set([note.hash])
+      return
+    }
+    if (entry?.accepted.has(note.hash)) return
+    this.known.set(path, { accepted: new Set([note.hash]), latest: note.hash })
     this.onChange(note)
   }
 }

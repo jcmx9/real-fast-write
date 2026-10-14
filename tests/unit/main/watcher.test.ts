@@ -95,8 +95,6 @@ describe('NoteWatcher', () => {
   it('expect() wins over the seeded baseline', async () => {
     const path = join(dir, 'f.md')
     await writeFile(path, 'alt')
-    // Let the creation event flush before watching, so it cannot race the expect() below.
-    await sleep(300)
     watcher.setFiles([path])
     watcher.expect(path, hashBytes(noteBytes('neu', false)))
     await sleep(150)
@@ -119,5 +117,31 @@ describe('NoteWatcher', () => {
     await writeFile(path, 'geändert')
     await sleep(600)
     expect(changes).toEqual([])
+  })
+
+  it('ignores a stale read of the old content while our own write is in flight', async () => {
+    const path = join(dir, 'h.md')
+    await writeFile(path, 'x')
+    watcher.setFiles([path])
+    watcher.expect(path, hashBytes(noteBytes('neu', false)))
+    await writeNote(path, 'neu', false)
+    await sleep(600)
+    expect(changes).toEqual([])
+    await writeFile(path, 'extern')
+    await waitFor(() => changes.length > 0)
+    expect(changes.at(-1)?.text).toBe('extern')
+  })
+
+  it('reports an external revert to older content after an own write has settled', async () => {
+    const path = join(dir, 'i.md')
+    await writeFile(path, 'v1')
+    watcher.setFiles([path])
+    watcher.expect(path, hashBytes(noteBytes('v2', false)))
+    await writeNote(path, 'v2', false)
+    await sleep(600)
+    expect(changes).toEqual([])
+    await writeFile(path, 'v1')
+    await waitFor(() => changes.length > 0)
+    expect(changes.at(-1)?.text).toBe('v1')
   })
 })
