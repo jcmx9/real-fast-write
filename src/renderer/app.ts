@@ -1,4 +1,4 @@
-import { redo, undo } from '@codemirror/commands'
+import { redo, selectAll, undo } from '@codemirror/commands'
 import { EditorView } from '@codemirror/view'
 import type { ExportResult, MenuCommand, NoteFile, View } from '../shared/types'
 import { AutosaveScheduler } from './editor/autosave'
@@ -123,6 +123,10 @@ export class App {
         return
       case 'redo':
         redo(this.editor)
+        return
+      case 'select-all':
+        selectAll(this.editor)
+        this.editor.focus()
         return
     }
   }

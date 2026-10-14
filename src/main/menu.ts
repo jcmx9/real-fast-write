@@ -58,7 +58,7 @@ export function buildMenuTemplate(d: MenuDeps): MenuItemConstructorOptions[] {
       { role: 'cut', label: 'Ausschneiden' },
       { role: 'copy', label: 'Kopieren' },
       { role: 'paste', label: 'Einfügen' },
-      { role: 'selectAll', label: 'Alles auswählen' },
+      item('select-all', 'Alles auswählen', 'CmdOrCtrl+A'),
     ],
   }
 

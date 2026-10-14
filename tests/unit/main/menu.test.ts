@@ -31,6 +31,7 @@ describe('buildMenuTemplate', () => {
     ['export', 'CmdOrCtrl+E'],
     ['undo', 'CmdOrCtrl+Z'],
     ['redo', 'CmdOrCtrl+Shift+Z'],
+    ['select-all', 'CmdOrCtrl+A'],
     ['next-tab', 'Ctrl+Tab'],
     ['prev-tab', 'Ctrl+Shift+Tab'],
   ])('%s has accelerator %s and sends its command', (id, accelerator) => {

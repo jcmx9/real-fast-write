@@ -61,6 +61,7 @@ export type MenuCommand =
   | 'prev-tab'
   | 'undo'
   | 'redo'
+  | 'select-all'
 
 export interface RfwApi {
   startup(): Promise<StartupState>
