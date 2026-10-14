@@ -44,4 +44,8 @@ describe('recent list', () => {
   it('replaces a renamed entry in place', () => {
     expect(replaceRecent(['x', 'old', 'y'], 'old', 'new')).toEqual(['x', 'new', 'y'])
   })
+
+  it('keeps the recent list unique when the new path is already listed', () => {
+    expect(replaceRecent(['x', 'old', 'new'], 'old', 'new')).toEqual(['x', 'new'])
+  })
 })

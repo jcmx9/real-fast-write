@@ -33,5 +33,5 @@ export function addRecent(list: readonly string[], path: string, max = MAX_RECEN
 }
 
 export function replaceRecent(list: readonly string[], from: string, to: string): string[] {
-  return list.map((p) => (p === from ? to : p))
+  return [...new Set(list.map((p) => (p === from ? to : p)))]
 }
