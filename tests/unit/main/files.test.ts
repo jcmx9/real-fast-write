@@ -68,7 +68,7 @@ describe('detectEol', () => {
 describe('readNote / writeNote', () => {
   it('strips and reports a BOM, keeps CRLF, hashes the raw bytes', async () => {
     const path = join(dir, 'bom.md')
-    const bytes = Buffer.from('﻿# Titel\r\nText\r\n', 'utf8')
+    const bytes = Buffer.from('\uFEFF# Titel\r\nText\r\n', 'utf8')
     await writeFile(path, bytes)
     const note = await readNote(path)
     expect(note).toEqual({
@@ -82,7 +82,7 @@ describe('readNote / writeNote', () => {
 
   it('round-trips byte-exact', async () => {
     const path = join(dir, 'rt.md')
-    const original = Buffer.from('﻿a\r\nb\nc\rd', 'utf8')
+    const original = Buffer.from('\uFEFFa\r\nb\nc\rd', 'utf8')
     await writeFile(path, original)
     const note = await readNote(path)
     const hash = await writeNote(path, note.text, note.bom)

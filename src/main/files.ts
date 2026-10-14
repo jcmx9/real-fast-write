@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import type { Eol, NoteFile } from '../shared/types'
 
-const BOM = '﻿'
+const BOM = '\uFEFF'
 const RETRY_CODES = new Set(['EPERM', 'EBUSY', 'EACCES'])
 const MAX_RETRIES = 5
 const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
@@ -105,12 +105,12 @@ export async function writeFileAtomic(
   try {
     await handle.writeFile(data)
     await handle.sync()
-  } catch (err) {
     await handle.close()
+  } catch (err) {
+    await handle.close().catch(() => undefined)
     await fs.rm(tmp, { force: true })
     throw err
   }
-  await handle.close()
   try {
     for (let attempt = 0; ; attempt++) {
       try {
