@@ -1,0 +1,103 @@
+import { readdir, readFile, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { expect, test } from '@playwright/test'
+import { clickMenu, launch, makeDirs, shot, typeInEditor, waitForFile } from './helpers'
+
+const tabs = (page: import('@playwright/test').Page) => page.locator('[data-testid=tab]')
+
+test('starts with a new note that is created on the first keystroke', async () => {
+  const { app, page, notes } = await launch()
+  await expect(tabs(page)).toHaveCount(1)
+  const name = (await tabs(page).first().locator('.tab-label').textContent()) ?? ''
+  expect(name).toMatch(/^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.md$/)
+  expect(await readdir(notes)).toEqual([])
+
+  await page.locator('.cm-content').click()
+  await page.keyboard.type('# Hallo')
+  await page.keyboard.press('Enter')
+  await page.keyboard.press('Enter')
+  await page.keyboard.type('Text')
+  const bytes = await waitForFile(
+    join(notes, name),
+    (b) => b.toString('utf8') === '# Hallo\n\nText',
+  )
+  expect(bytes.toString('utf8')).toBe('# Hallo\n\nText')
+  await expect(page.getByTestId('status-state')).toHaveText('Gespeichert')
+  await shot(page, 'edit-code')
+  await app.close()
+})
+
+test('opens a file from the command line and keeps BOM and CRLF byte-exact', async () => {
+  const dirs = await makeDirs()
+  const file = join(dirs.notes, 'Protokoll.md')
+  await writeFile(file, Buffer.from('\uFEFF# Titel\r\n\r\nZeile\r\n', 'utf8'))
+  const { app, page } = await launch({ dirs, args: [file] })
+  await expect(tabs(page).first()).toContainText('Protokoll.md')
+  await typeInEditor(page, 'Neu')
+  await page.keyboard.press('Enter')
+  await page.keyboard.type('Zwei')
+  const expected = Buffer.from('\uFEFF# Titel\r\n\r\nZeile\r\nNeu\r\nZwei', 'utf8')
+  await waitForFile(file, (b) => b.equals(expected))
+  await app.close()
+})
+
+test('opens a second tab and switches with the window menu', async () => {
+  const { app, page } = await launch()
+  await clickMenu(app, 'new')
+  await expect(tabs(page)).toHaveCount(2)
+  await expect(tabs(page).nth(1)).toHaveClass(/active/)
+  await clickMenu(app, 'prev-tab')
+  await expect(tabs(page).nth(0)).toHaveClass(/active/)
+  await app.close()
+})
+
+test('rename refuses an existing name and then renames', async () => {
+  const dirs = await makeDirs()
+  const a = join(dirs.notes, 'a.md')
+  await writeFile(a, 'A')
+  await writeFile(join(dirs.notes, 'b.md'), 'B')
+  const { app, page } = await launch({ dirs, args: [a] })
+
+  await clickMenu(app, 'rename')
+  await page.locator('dialog.prompt input').fill('b')
+  await page.keyboard.press('Enter')
+  await expect(page.locator('.panel')).toContainText('existiert bereits')
+  expect(await readFile(join(dirs.notes, 'b.md'), 'utf8')).toBe('B')
+
+  await clickMenu(app, 'rename')
+  await page.locator('dialog.prompt input').fill('Kickoff')
+  await page.keyboard.press('Enter')
+  await expect(tabs(page).first()).toContainText('Kickoff.md')
+  expect((await readdir(dirs.notes)).sort()).toEqual(['Kickoff.md', 'b.md'])
+  await app.close()
+})
+
+test('restores open tabs after a restart', async () => {
+  const dirs = await makeDirs()
+  const file = join(dirs.notes, 'bleibt.md')
+  await writeFile(file, 'x')
+  const first = await launch({ dirs, args: [file] })
+  await first.app.close()
+  const second = await launch({ dirs })
+  await expect(tabs(second.page)).toHaveCount(1)
+  await expect(tabs(second.page).first()).toContainText('bleibt.md')
+  await second.app.close()
+})
+
+test('reloads a clean tab when the file changes on disk', async () => {
+  const dirs = await makeDirs()
+  const file = join(dirs.notes, 'extern.md')
+  await writeFile(file, 'alt')
+  const { app, page } = await launch({ dirs, args: [file] })
+  await expect(page.locator('.cm-content')).toContainText('alt')
+  await writeFile(file, 'neu von außen')
+  await expect(page.locator('.cm-content')).toContainText('neu von außen')
+  await app.close()
+})
+
+test('prints the version without opening a window', async () => {
+  const { execFileSync } = await import('node:child_process')
+  const electronPath = (await import('electron')).default as unknown as string
+  const out = execFileSync(electronPath, ['.', '--version'], { encoding: 'utf8' })
+  expect(out.trim()).toMatch(/^rf-write \d+\.\d+\.\d+/)
+})
