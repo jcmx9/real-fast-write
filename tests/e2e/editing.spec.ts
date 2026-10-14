@@ -82,3 +82,16 @@ test('select all in the rename dialog acts on the input, not the editor', async 
   expect(await readFile(file, 'utf8')).toBe('Inhalt der Notiz')
   await app.close()
 })
+
+test('select all still reaches the editor when a button has focus', async () => {
+  const dirs = await makeDirs()
+  const file = join(dirs.notes, 'button.md')
+  await writeFile(file, 'Inhalt')
+  const { app, page } = await launch({ dirs, args: [file] })
+  await page.getByTestId('export').focus()
+  await clickMenu(app, 'select-all')
+  await expect(page.locator('.cm-selectionBackground').first()).toBeVisible()
+  await page.keyboard.type('X')
+  await waitForFile(file, (b) => b.toString('utf8') === 'X')
+  await app.close()
+})

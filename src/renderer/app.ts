@@ -129,13 +129,17 @@ export class App {
 
   /** Edit commands go to CodeMirror unless another text field (dialog, panel) has focus. */
   private editCommand(name: 'undo' | 'redo' | 'selectAll', run: (v: EditorView) => unknown): void {
-    const active = document.activeElement
-    if (this.editor.hasFocus || !active || active === document.body) {
-      run(this.editor)
-      this.editor.focus()
+    const el = document.activeElement
+    const textField =
+      el instanceof HTMLInputElement ||
+      el instanceof HTMLTextAreaElement ||
+      (el instanceof HTMLElement && el.isContentEditable && !this.editor.dom.contains(el))
+    if (textField) {
+      document.execCommand(name)
       return
     }
-    document.execCommand(name)
+    run(this.editor)
+    this.editor.focus()
   }
 
   private globalKeys(e: KeyboardEvent): void {
@@ -201,7 +205,13 @@ export class App {
     if (this.store.isDirty(tab) && !(await this.saveTab(tab))) {
       if (!(await this.rfw.confirmDiscard([fileName(tab.path)]))) return
     }
-    if (!tab.onDisk) await this.rfw.releasePath(tab.path)
+    if (!tab.onDisk) {
+      try {
+        await this.rfw.releasePath(tab.path)
+      } catch {
+        // closing must not be blocked by a failed release
+      }
+    }
     this.store.close(id)
     this.notices.dismiss(tab.path)
     this.saveErrors.delete(id)
@@ -222,7 +232,12 @@ export class App {
       )
       return
     }
-    const res = await this.rfw.renameNote(tab.path, name)
+    let res: Awaited<ReturnType<typeof this.rfw.renameNote>>
+    try {
+      res = await this.rfw.renameNote(tab.path, name)
+    } catch (e) {
+      res = { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
     if (!res.ok) {
       this.notices.panel('Umbenennen nicht möglich', res.error)
       return
@@ -244,6 +259,8 @@ export class App {
     this.status.setExporting(true)
     try {
       this.showExport(await this.rfw.exportPdf(tab.path))
+    } catch (e) {
+      this.notices.panel('Export fehlgeschlagen', e instanceof Error ? e.message : String(e))
     } finally {
       this.status.setExporting(false)
     }
