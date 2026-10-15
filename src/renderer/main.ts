@@ -1,6 +1,7 @@
 import './styles.css'
 import './theme.css'
 import { App } from './app'
+import { registerFonts } from './ui/fonts'
 import { supportsGermanHyphenation } from './ui/hyphenation'
 
 function byId(id: string): HTMLElement {
@@ -9,6 +10,7 @@ function byId(id: string): HTMLElement {
   return el
 }
 
+registerFonts(document)
 if (supportsGermanHyphenation(document)) document.documentElement.classList.add('rf-justify')
 
 const app = new App({
