@@ -68,6 +68,20 @@ describe('session', () => {
     expect(s.zoom).toEqual({ edit: 3, present: 1 })
     expect(s.recent).toHaveLength(10)
   })
+
+  it('outline: missing → both off, booleans kept, anything else → off', () => {
+    expect(DEFAULT_SESSION.outline).toEqual({ edit: false, present: false })
+    expect(sanitizeSession({}).outline).toEqual({ edit: false, present: false })
+    expect(sanitizeSession({ outline: { edit: true, present: true } }).outline).toEqual({
+      edit: true,
+      present: true,
+    })
+    expect(sanitizeSession({ outline: { edit: 'yes', present: 1 } }).outline).toEqual({
+      edit: false,
+      present: false,
+    })
+    expect(sanitizeSession({ outline: true }).outline).toEqual({ edit: false, present: false })
+  })
 })
 
 describe('loadJson / saveJson', () => {

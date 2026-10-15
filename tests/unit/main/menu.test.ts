@@ -38,6 +38,7 @@ describe('buildMenuTemplate', () => {
     ['toggle-present', 'CmdOrCtrl+Shift+P'],
     ['toggle-view', 'CmdOrCtrl+Shift+M'],
     ['toggle-header', 'CmdOrCtrl+Shift+H'],
+    ['toggle-outline', 'CmdOrCtrl+Shift+O'],
     ['fold', 'Cmd+Alt+['],
     ['unfold', 'Cmd+Alt+]'],
     ['fold-all', 'Ctrl+Alt+['],
@@ -116,6 +117,10 @@ describe('buildMenuTemplate', () => {
     }
   })
 
+  it('labels the outline toggle in German', () => {
+    expect(byId(buildMenuTemplate(deps()), 'toggle-outline')?.label).toBe('Gliederung ein/aus')
+  })
+
   it('puts the view items under "Ansicht" in production too', () => {
     const view = buildMenuTemplate(deps()).find((m) => m.label === 'Ansicht')
     const ids = ((view?.submenu ?? []) as { id?: string }[]).map((i) => i.id).filter(Boolean)
@@ -123,6 +128,7 @@ describe('buildMenuTemplate', () => {
       'toggle-present',
       'toggle-view',
       'toggle-header',
+      'toggle-outline',
       'fold',
       'unfold',
       'fold-all',

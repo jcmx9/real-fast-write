@@ -127,6 +127,7 @@ dialog.prompt input:focus-visible {
 }
 #workspace {
   position: relative;
+  display: flex;
   flex: 1;
   min-height: 0;
 }
@@ -159,7 +160,88 @@ dialog.prompt input:focus-visible {
 #editor .cm-editor {
   height: 100%;
 }
+#editor {
+  flex: 1;
+  min-width: 0;
+}
+#outline {
+  box-sizing: border-box;
+  width: max-content;
+  min-width: 14em;
+  max-width: 33vw;
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* A classic (Windows/Linux) scrollbar keeps its room, so the bar does not change width
+     when the outline starts to scroll. */
+  scrollbar-gutter: stable;
+  border-left: 1px solid var(--line);
+  padding: 8px 4px;
+  background: var(--chrome-bg);
+  color: var(--chrome-muted);
+  /* Chrome size: the zoom variables only apply inside #editor. */
+  font-size: 13px;
+}
+#outline .rf-ol-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+#outline .rf-ol-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+#outline .rf-ol-item > .rf-ol-list {
+  flex-basis: 100%;
+}
+#outline .rf-ol-h2 {
+  padding-left: 1.2em;
+}
+#outline button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+#outline button:hover {
+  color: var(--chrome-fg);
+}
+#outline button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+#outline .rf-ol-label {
+  flex: 1;
+  min-width: 0;
+  max-width: 100%;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#outline .rf-ol-label.active {
+  color: var(--accent);
+}
+#outline .rf-ol-chevron,
+#outline .rf-ol-spacer {
+  flex: none;
+  width: 1.4em;
+  text-align: center;
+  padding-inline: 0;
+}
+#outline .rf-ol-chevron.expanded {
+  transform: rotate(90deg);
+}
+#outline .rf-ol-empty {
+  margin: 0;
+  padding: 2px 4px;
+}
 #empty {
+  flex: 1;
+  min-width: 0;
   display: grid;
   place-content: center;
   justify-items: center;

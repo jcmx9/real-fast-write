@@ -11,6 +11,7 @@ export const DEFAULT_SESSION: Session = {
   mode: 'edit',
   view: 'preview',
   zoom: { edit: 1, present: 1 },
+  outline: { edit: false, present: false },
   recent: [],
 }
 
@@ -52,12 +53,14 @@ export function sanitizeSession(raw: unknown): Session {
       })
     : []
   const zoom = isObj(o.zoom) ? o.zoom : {}
+  const outline = isObj(o.outline) ? o.outline : {}
   return {
     tabs,
     activeIndex: tabs.length ? Math.trunc(clamp(o.activeIndex, 0, tabs.length - 1, 0)) : 0,
     mode: o.mode === 'present' ? 'present' : 'edit',
     view: o.view === 'code' ? 'code' : 'preview',
     zoom: { edit: clamp(zoom.edit, 0.5, 3, 1), present: clamp(zoom.present, 0.5, 3, 1) },
+    outline: { edit: outline.edit === true, present: outline.present === true },
     recent: Array.isArray(o.recent)
       ? o.recent
           .map(absPath)

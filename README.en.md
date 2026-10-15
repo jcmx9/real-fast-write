@@ -43,15 +43,20 @@ The preview uses rf-document's fonts from its install folder and otherwise falls
 | Mod+E | Export PDF |
 | Mod+Shift+M | Toggle code view (preview is the default) |
 | Mod+Shift+H | Show/hide the YAML header in the preview (hidden, the title block appears as in the PDF) |
+| Mod+Shift+O | Toggle outline (remembered per mode) |
 | macOS Cmd+Alt+[ / ], otherwise Ctrl+Shift+[ / ] | Fold/unfold section |
 | macOS Ctrl+Alt+[ / ], otherwise Alt+0 / Alt+Shift+0 | Fold/unfold all sections |
-| Mod+Shift+P, Esc | Toggle presentation (fullscreen, text and info line only) |
+| Mod+Shift+P, Esc | Toggle presentation (fullscreen, text and info line only, optionally with the outline) |
 | Mod+Enter | Insert a page break (`<!-- pagebreak -->`, as in rf-document) |
 | Mod+Plus / Mod+- / Mod+0 | Zoom in / out / reset (stored per mode) |
 | Ctrl+Tab / Ctrl+Shift+Tab, Mod+1…9 | Switch tabs |
 | Mod+Z / Mod+Shift+Z, Mod+X/C/V, Mod+A | Undo/Redo, Cut/Copy/Paste, Select all |
 
 `Mod` = Cmd on macOS, Ctrl elsewhere. Selecting with Shift or Mod+Shift and the arrow keys is handled by CodeMirror.
+
+## Outline
+
+A sidebar on the right lists the H1 and H2 headings of the note. The chevron in front of an entry with content (H1 or H2) folds or unfolds the section in the text and in the outline at the same time; fold/unfold all acts on both as well. Clicking an entry jumps to the heading in the text, and focus stays in the editor. Mod+Shift+O toggles the outline; the setting is remembered separately for Edit and Present.
 
 ## Snippets
 
