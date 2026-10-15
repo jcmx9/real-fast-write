@@ -60,6 +60,16 @@ describe('frontmatterFields', () => {
       leer: '',
     })
   })
+  it('reads fields from CRLF lines', () => {
+    const t = Text.of(['---\r', 'title: "X"\r', 'b: y\r', '---\r', 'rest'])
+    expect(frontmatterFields(t)).toEqual({ title: 'X', b: 'y' })
+  })
+  it('handles comment-only and unclosed-quote values', () => {
+    expect(frontmatterFields(doc('---\nk: # nur Kommentar\nq: "abc\n---'))).toEqual({
+      k: '',
+      q: 'abc',
+    })
+  })
   it('is empty without front matter', () => {
     expect(frontmatterFields(doc('# kein header'))).toEqual({})
   })
@@ -71,5 +81,23 @@ describe('Frontmatter parser', () => {
   })
   it('does not treat a later --- block as front matter', () => {
     expect(topNodes('Text\n\n---\na: 1\n---\n')).not.toContain('Frontmatter')
+  })
+  it('consumes an unclosed header as Frontmatter while frontmatterRange is null', () => {
+    const t = '---\ntitle: x\n'
+    expect(topNodes(t)).toEqual(['Frontmatter'])
+    expect(frontmatterRange(doc(t))).toBeNull()
+  })
+  it('closes on ...', () => {
+    expect(topNodes('---\na: 1\n...\n\n# H\n')).toEqual(['Frontmatter', 'ATXHeading1'])
+  })
+  it('agrees with frontmatterRange on the node range', () => {
+    const t = '---\ntitle: x\n---\n\n# Body'
+    const state = EditorState.create({
+      doc: t,
+      extensions: markdown({ base: markdownLanguage, extensions: [Frontmatter] }),
+    })
+    ensureSyntaxTree(state, state.doc.length, 5000)
+    const node = syntaxTree(state).topNode.firstChild
+    expect({ from: node?.from, to: node?.to }).toEqual(frontmatterRange(doc(t)))
   })
 })

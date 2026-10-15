@@ -27,7 +27,8 @@ export const Frontmatter: MarkdownConfig = {
             break
           }
         }
-        // An unclosed header still forms one block, so typing it never yields setext headings.
+        // An unclosed header still forms one block, so typing it never yields setext headings
+        // (frontmatterRange returns null for it).
         cx.addElement(cx.elt('Frontmatter', 0, end, marks))
         return true
       },
@@ -51,7 +52,7 @@ export function frontmatterFields(doc: Text): Record<string, string> {
   if (!range) return out
   const lines = doc.sliceString(range.from, range.to).split('\n').slice(1, -1)
   for (const raw of lines) {
-    const m = /^([A-Za-z0-9_-]+):(.*)$/.exec(raw)
+    const m = /^([A-Za-z0-9_-]+):(.*)$/.exec(raw.replace(/\r$/, ''))
     if (!m?.[1]) continue
     out[m[1]] = cleanValue(m[2] ?? '')
   }
@@ -62,6 +63,7 @@ function cleanValue(raw: string): string {
   const v = raw.trim()
   const quoted = /^(["'])(.*?)\1/.exec(v)
   if (quoted) return quoted[2] ?? ''
+  if (/^["']/.test(v)) return v.slice(1).trim()
   if (v.startsWith('[')) {
     const inner = v.slice(1).split(']')[0] ?? ''
     return inner
@@ -71,5 +73,5 @@ function cleanValue(raw: string): string {
       .filter(Boolean)
       .join(', ')
   }
-  return v.replace(/\s#.*$/, '').trim()
+  return v.replace(/(^|\s)#.*$/, '').trim()
 }
