@@ -174,6 +174,27 @@ rm -rf "${old_dir}"
 assert_installed
 pass "leftover .old: own one removed on update, foreign one -> exit 1 and kept"
 
+# 5b. macOS: update and uninstall refuse while rf-write runs (exit 12), nothing changes.
+#     A `sleep` whose argv[0] is the app's executable stands in for the running app.
+if [[ "${os}" == "Darwin" ]]; then
+  bash -c 'exec -a "$0" sleep 120' "${install_dir}/Contents/MacOS/rf-write" &
+  fake_app=$!
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    pgrep -f -- "${install_dir}/Contents/MacOS/rf-write" >/dev/null && break
+    sleep 0.2
+  done
+  inode="$(stat -f %i "${install_dir}")"
+  expect_code 12 "läuft noch" with_archive "${archive}"
+  expect_code 12 "läuft noch" run_bootstrap --uninstall
+  [[ "$(stat -f %i "${install_dir}")" == "${inode}" ]] || fail "running app was replaced"
+  kill "${fake_app}"
+  wait "${fake_app}" 2>/dev/null || true
+  assert_installed
+  with_archive "${archive}"
+  assert_installed
+  pass "macOS: update/uninstall while rf-write runs -> exit 12, app untouched; works after quit"
+fi
+
 # 6. Download path against a fake GitHub: a stand-in `curl` first on PATH serves fixtures
 #    keyed by URL (<key>, <key>.status, <key>.headers, <key>.offline).
 fake="${work}/fake-gh"

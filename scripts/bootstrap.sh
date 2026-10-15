@@ -31,6 +31,7 @@
 #   7 Wiederherstellung fehlgeschlagen – manuell nötig (Pfad wird ausgegeben)
 #   8 keine passende Release (noch keine stabile, keine Vorabversion, Datei fehlt)
 #   9 Version gibt es nicht       10 GitHub-Abfragelimit erreicht
+#  12 rf-write läuft noch (macOS; nichts verändert)
 #
 # Release lookup uses the unauthenticated GitHub API (60 requests/hour) with exactly
 # one call: /releases/latest (never a pre-release or draft), /releases?per_page=50 for
@@ -373,8 +374,21 @@ die_recovery() {
   exit 7
 }
 
+# macOS: Electron starts its helpers from the bundle path, so swapping or deleting the
+# bundle under a running app could mix versions or crash it (Linux keeps the mounted
+# AppImage's inode; Windows refuses on its own). Stops with 12, nothing changed.
+refuse_running() {
+  [[ "${os}" == "Darwin" ]] || return 0
+  local pattern
+  pattern="$(printf '%s' "${install_dir}/Contents/" | sed -e 's/[][\\.*^$+?(){}|]/\\&/g')"
+  if pgrep -f -- "${pattern}" >/dev/null 2>&1; then
+    die 12 "rf-write läuft noch – bitte beenden und erneut versuchen. Es wurde nichts verändert."
+  fi
+}
+
 # Swaps the staged install in: old → .old, new → target, delete .old; restores .old on failure.
 swap_install() {
+  refuse_running
   local old="${install_dir}.old"
   if [[ -e "${old}" ]]; then
     # Leftover from an interrupted run: only ours may go.
@@ -542,6 +556,7 @@ do_install() {
   fi
 
   if [[ -e "${install_dir}" ]]; then
+    refuse_running
     say "Aktualisiere ${install_dir}"
   else
     say "Installiere nach ${install_dir}"
@@ -609,6 +624,7 @@ do_uninstall() {
     exit 0
   fi
   owns_dir "${install_dir}" || refuse_foreign "${install_dir}"
+  refuse_running
   remove_old
   say "Lösche ${install_dir}"
   rm -rf "${install_dir}" || die 6 "Konnte ${install_dir} nicht vollständig löschen."
