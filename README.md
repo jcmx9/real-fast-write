@@ -46,7 +46,7 @@ Die Preview nutzt die Schriften von rf-document aus dessen Installationsordner u
 | Mod+Shift+O | Gliederung ein/aus (je Modus gemerkt) |
 | macOS Cmd+Alt+[ / ], sonst Ctrl+Shift+[ / ] | Abschnitt ein-/ausklappen |
 | macOS Ctrl+Alt+[ / ], sonst Alt+0 / Alt+Shift+0 | Alle Abschnitte ein-/ausklappen |
-| Mod+Shift+P, Esc | Präsentieren ein/aus (Vollbild, nur Text und Infozeile) |
+| Mod+Shift+P, Esc | Präsentieren ein/aus (Vollbild, nur Text und Infozeile, auf Wunsch mit Gliederung) |
 | Mod+Enter | Seitenumbruch einfügen (`<!-- pagebreak -->`, wie rf-document) |
 | Mod+Plus / Mod+- / Mod+0 | Vergrößern / Verkleinern / Originalgröße (je Modus gespeichert) |
 | Ctrl+Tab / Ctrl+Shift+Tab, Mod+1…9 | Tabs wechseln |
@@ -56,7 +56,7 @@ Die Preview nutzt die Schriften von rf-document aus dessen Installationsordner u
 
 ## Gliederung
 
-Eine Seitenleiste rechts listet die Überschriften H1 und H2 der Notiz. Der Pfeil vor einer H1 klappt den Abschnitt im Text und in der Gliederung gleichzeitig ein oder aus; „Alle ein-/ausklappen“ wirkt ebenso auf beide. Ein Klick auf einen Eintrag springt im Text zur Überschrift, der Fokus bleibt im Editor. Mod+Shift+O blendet die Gliederung ein oder aus; die Einstellung wird getrennt für Edit und Present gemerkt.
+Eine Seitenleiste rechts listet die Überschriften H1 und H2 der Notiz. Der Pfeil vor einem Eintrag mit Inhalt (H1 oder H2) klappt den Abschnitt im Text und in der Gliederung gleichzeitig ein oder aus; „Alle ein-/ausklappen“ wirkt ebenso auf beide. Ein Klick auf einen Eintrag springt im Text zur Überschrift, der Fokus bleibt im Editor. Mod+Shift+O blendet die Gliederung ein oder aus; die Einstellung wird getrennt für Edit und Present gemerkt.
 
 ## Snippets
 
