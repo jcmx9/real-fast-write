@@ -1,5 +1,13 @@
-import { describe, expect, it } from 'vitest'
-import { editorSizes, ZOOM_STEPS, zoomIn, zoomLabel, zoomOut } from '../../../src/renderer/ui/zoom'
+import { describe, expect, it, vi } from 'vitest'
+import {
+  editorSizes,
+  handleZoomKey,
+  ZOOM_STEPS,
+  zoomIn,
+  zoomKey,
+  zoomLabel,
+  zoomOut,
+} from '../../../src/renderer/ui/zoom'
 
 describe('zoom steps', () => {
   it('walks the fixed steps and clamps at both ends', () => {
@@ -30,5 +38,89 @@ describe('editorSizes', () => {
   })
   it('rounds to two decimals', () => {
     expect(editorSizes('edit', 0.67, 1.6)).toEqual({ body: '6.7pt', code: '6.03pt' })
+  })
+})
+
+type Key = {
+  key: string
+  code?: string
+  ctrlKey?: boolean
+  metaKey?: boolean
+  shiftKey?: boolean
+  altKey?: boolean
+}
+const ev = (k: Key) => ({
+  code: '',
+  ctrlKey: false,
+  metaKey: false,
+  shiftKey: false,
+  altKey: false,
+  ...k,
+})
+
+describe('zoomKey', () => {
+  it.each([
+    // US: Mod+= and Mod+Shift+= ('+'); German: Mod+'+' without Shift
+    [{ key: '=', code: 'Equal', ctrlKey: true }, 'in'],
+    [{ key: '+', code: 'Equal', ctrlKey: true, shiftKey: true }, 'in'],
+    [{ key: '+', code: 'BracketRight', ctrlKey: true }, 'in'],
+    [{ key: '+', code: 'NumpadAdd', ctrlKey: true }, 'in'],
+    [{ key: '-', code: 'Minus', ctrlKey: true }, 'out'],
+    [{ key: '-', code: 'Slash', ctrlKey: true }, 'out'],
+    [{ key: '-', code: 'NumpadSubtract', ctrlKey: true }, 'out'],
+    [{ key: '0', code: 'Digit0', ctrlKey: true }, 'reset'],
+    [{ key: '0', code: 'Numpad0', ctrlKey: true }, 'reset'],
+    [{ key: 'Insert', code: 'Numpad0', ctrlKey: true }, 'reset'],
+  ] as const)('Ctrl %o -> %s off macOS', (k, action) => {
+    expect(zoomKey(ev(k), false)).toBe(action)
+  })
+
+  it('uses Cmd on macOS and Ctrl elsewhere', () => {
+    expect(zoomKey(ev({ key: '+', metaKey: true }), true)).toBe('in')
+    expect(zoomKey(ev({ key: '+', ctrlKey: true }), true)).toBeNull()
+    expect(zoomKey(ev({ key: '+', metaKey: true }), false)).toBeNull()
+  })
+
+  it.each([
+    { key: '+' }, // no modifier
+    { key: '+', ctrlKey: true, altKey: true }, // AltGr / Alt combos stay free
+    { key: '=', code: 'Digit0', ctrlKey: true, shiftKey: true }, // German Ctrl+Shift+0
+    { key: '0', code: 'Digit0', ctrlKey: true, shiftKey: true },
+    { key: 'p', ctrlKey: true },
+  ])('ignores %o', (k) => {
+    expect(zoomKey(ev(k), false)).toBeNull()
+  })
+})
+
+describe('handleZoomKey', () => {
+  it('steps once and claims the key, so the menu accelerator does not step again', () => {
+    const preventDefault = vi.fn()
+    const apply = vi.fn()
+    const handled = handleZoomKey(
+      { ...ev({ key: '+', ctrlKey: true }), preventDefault },
+      false,
+      apply,
+    )
+    expect(handled).toBe(true)
+    expect(apply).toHaveBeenCalledTimes(1)
+    expect(apply).toHaveBeenCalledWith('in')
+    expect(preventDefault).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves other keys and already handled keys alone', () => {
+    const apply = vi.fn()
+    const preventDefault = vi.fn()
+    expect(
+      handleZoomKey({ ...ev({ key: 'a', ctrlKey: true }), preventDefault }, false, apply),
+    ).toBe(false)
+    expect(
+      handleZoomKey(
+        { ...ev({ key: '+', ctrlKey: true }), defaultPrevented: true, preventDefault },
+        false,
+        apply,
+      ),
+    ).toBe(false)
+    expect(apply).not.toHaveBeenCalled()
+    expect(preventDefault).not.toHaveBeenCalled()
   })
 })

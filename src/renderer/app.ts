@@ -14,7 +14,7 @@ import { Notices } from './ui/notices'
 import { askText } from './ui/prompt'
 import { SAVE_STATE_LABEL, type SaveState, StatusLine } from './ui/statusline'
 import { TabBar } from './ui/tabbar'
-import { editorSizes, zoomIn, zoomOut } from './ui/zoom'
+import { editorSizes, handleZoomKey, zoomIn, zoomOut } from './ui/zoom'
 import { fileName } from './util/path'
 import { SerialQueue } from './util/serial'
 
@@ -229,12 +229,12 @@ export class App {
       void this.exitPresent()
       return
     }
+    const zoomed = handleZoomKey(e, isMac, (action) => {
+      const z = this.zoom[this.mode]
+      this.setZoom(action === 'in' ? zoomIn(z) : action === 'out' ? zoomOut(z) : 1)
+    })
+    if (zoomed) return
     const mod = isMac ? e.metaKey : e.ctrlKey
-    if (mod && !e.altKey && e.key === '=') {
-      e.preventDefault()
-      this.setZoom(zoomIn(this.zoom[this.mode]))
-      return
-    }
     if (mod && !e.shiftKey && !e.altKey && /^[1-9]$/.test(e.key)) {
       e.preventDefault()
       this.activate(Number(e.key) - 1)
