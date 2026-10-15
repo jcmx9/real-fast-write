@@ -14,7 +14,7 @@ import type {
 import { addRecent, replaceRecent } from './cli'
 import { runRfDocument } from './export'
 import { fontDir, fontStatus } from './fonts'
-import { LeaveTracker } from './fullscreen'
+import { FullScreenOwner } from './fullscreen'
 import { isExecutableFile, locateRfDocument } from './locate'
 import { buildMenuTemplate } from './menu'
 import {
@@ -34,8 +34,8 @@ export function logSessionError(err: unknown): void {
 
 export class AppContext {
   window: BrowserWindow | null = null
-  /** App-requested fullscreen leaves still to come; reset with every new window. */
-  fullScreenLeaves = new LeaveTracker()
+  /** Whether the app owns the window's fullscreen; reset with every new window. */
+  fullScreen = new FullScreenOwner()
   settings: Settings
   session: Session = DEFAULT_SESSION
   fonts: FontStatus = { dir: '', found: false, missing: [] }
@@ -80,7 +80,7 @@ export class AppContext {
   createWindow(): void {
     const win = createMainWindow()
     this.window = win
-    this.fullScreenLeaves = new LeaveTracker()
+    this.fullScreen = new FullScreenOwner()
     this.rendererReady = false
     this.closeApproved = false
     win.on('close', (e) => {
@@ -100,9 +100,11 @@ export class AppContext {
       this.rendererReady = false
     })
     win.on('leave-full-screen', () => {
+      // Only an OS-initiated leave ends Present; the app already knows about its own (and
+      // restored the menu bar on request, so a late leave never shows it in a new Present).
+      if (!this.fullScreen.onLeave()) return
       if (process.platform !== 'darwin') win.setMenuBarVisibility(true)
-      // Only an OS-initiated leave ends Present; the app already knows about its own.
-      if (this.fullScreenLeaves.onLeave()) this.send(Ch.fullScreenLeft)
+      this.send(Ch.fullScreenLeft)
     })
     this.installMenu()
   }

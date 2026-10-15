@@ -8,10 +8,30 @@ export interface MenuDeps {
   command(c: MenuCommand): void
   openRecent(path: string): void
   clearRecent(): void
+  /** Clock for the held-shortcut guard (tests); defaults to Date.now. */
+  now?: () => number
+}
+
+/** Key repeats closer than this belong to one held shortcut. */
+const KEY_REPEAT_MS = 500
+
+/** Electron passes this as the click handler's third argument. */
+interface ClickEvent {
+  triggeredByAccelerator?: boolean
 }
 
 export function buildMenuTemplate(d: MenuDeps): MenuItemConstructorOptions[] {
   const mac = d.platform === 'darwin'
+  const now = d.now ?? Date.now
+  // A held Cmd/Ctrl+Shift+P repeats; only the first press toggles Present (no flapping).
+  let lastPresentKey = Number.NEGATIVE_INFINITY
+  const heldRepeat = (id: MenuCommand, event: ClickEvent | undefined): boolean => {
+    if (id !== 'toggle-present' || !event?.triggeredByAccelerator) return false
+    const t = now()
+    const repeat = t - lastPresentKey < KEY_REPEAT_MS
+    lastPresentKey = t
+    return repeat
+  }
   const item = (
     id: MenuCommand,
     label: string,
@@ -20,7 +40,9 @@ export function buildMenuTemplate(d: MenuDeps): MenuItemConstructorOptions[] {
     id,
     label,
     accelerator,
-    click: () => d.command(id),
+    click: (_item, _win, event: ClickEvent | undefined) => {
+      if (!heldRepeat(id, event)) d.command(id)
+    },
   })
   const sep: MenuItemConstructorOptions = { type: 'separator' }
 

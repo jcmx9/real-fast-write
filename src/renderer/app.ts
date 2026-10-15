@@ -16,6 +16,7 @@ import { SAVE_STATE_LABEL, type SaveState, StatusLine } from './ui/statusline'
 import { TabBar } from './ui/tabbar'
 import { editorSizes, zoomIn, zoomOut } from './ui/zoom'
 import { fileName } from './util/path'
+import { SerialQueue } from './util/serial'
 
 const INSTALL_HINT = [
   'macOS/Linux:',
@@ -53,10 +54,12 @@ export class App {
   private mode: Mode = 'edit'
   private zoom = { edit: 1, present: 1 }
   private presentFactor = 1.6
-  /** The window was already fullscreen when Present started: leaving Present keeps it so. */
-  private wasFullScreen = false
-  /** Serializes fullscreen requests so fast toggles reach main in order. */
-  private fullScreenOps: Promise<void> = Promise.resolve()
+  /**
+   * Serializes fullscreen requests so fast toggles reach main in order. Main owns the
+   * fullscreen decision: it only leaves a fullscreen the app started (a user's own
+   * fullscreen survives Present) and never reports its own leave as an OS leave.
+   */
+  private readonly fullScreenOps = new SerialQueue()
   private shownId: number | null = null
   private readonly saveErrors = new Map<number, string>()
   private readonly conflicts = new Set<number>()
@@ -194,6 +197,8 @@ export class App {
       case 'zoom-reset':
         return this.setZoom(1)
       case 'toggle-present':
+        // A held or hammered shortcut must not flap while a fullscreen request is in flight.
+        if (this.fullScreenOps.busy) return
         return this.mode === 'present' ? this.exitPresent() : this.enterPresent()
     }
   }
@@ -343,11 +348,10 @@ export class App {
     this.applyZoom()
     this.refresh()
     this.editor.focus()
-    await this.queueFullScreen(async () => {
+    await this.fullScreenOps.run(async () => {
       try {
-        this.wasFullScreen = await this.rfw.setFullScreen(true)
+        await this.rfw.setFullScreen(true)
       } catch (e) {
-        this.wasFullScreen = false
         console.error('setFullScreen(true) failed', e)
         this.notices.toast('Vollbild nicht verfügbar')
       }
@@ -367,19 +371,15 @@ export class App {
     this.applyZoom()
     this.refresh()
     this.editor.focus()
-    await this.queueFullScreen(async () => {
-      if (!fullScreen || this.wasFullScreen) return
+    await this.fullScreenOps.run(async () => {
+      // Sent even for a user's own fullscreen: main keeps that and only restores the menu bar.
+      if (!fullScreen) return
       try {
         await this.rfw.setFullScreen(false)
       } catch (e) {
         console.error('setFullScreen(false) failed', e)
       }
     })
-  }
-
-  private queueFullScreen(op: () => Promise<void>): Promise<void> {
-    this.fullScreenOps = this.fullScreenOps.then(op)
-    return this.fullScreenOps
   }
 
   private toggleHeader(): void {

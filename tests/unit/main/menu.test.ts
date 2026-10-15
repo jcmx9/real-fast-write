@@ -52,6 +52,29 @@ describe('buildMenuTemplate', () => {
     expect(d.command).toHaveBeenCalledWith(id)
   })
 
+  it('ignores toggle-present key repeats from a held shortcut', () => {
+    let now = 1000
+    const d = deps({ now: () => now })
+    const item = byId(buildMenuTemplate(d), 'toggle-present')
+    if (!item) throw new Error('menu item not found')
+    const key = () =>
+      (item.click as unknown as (a: unknown, b: unknown, e: unknown) => void)(null, null, {
+        triggeredByAccelerator: true,
+      })
+    key()
+    for (let i = 0; i < 20; i++) {
+      now += 40 // OS key repeat while the shortcut is held
+      key()
+    }
+    expect(d.command).toHaveBeenCalledTimes(1)
+    now += 1000 // released, pressed again later
+    key()
+    expect(d.command).toHaveBeenCalledTimes(2)
+    // Mouse clicks on the menu item are never debounced.
+    click(item)
+    expect(d.command).toHaveBeenCalledTimes(3)
+  })
+
   it('has an app menu on macOS and a quit item elsewhere', () => {
     expect(buildMenuTemplate(deps())[0]?.role).toBe('appMenu')
     const winItems = flatten(buildMenuTemplate(deps({ platform: 'win32' })))

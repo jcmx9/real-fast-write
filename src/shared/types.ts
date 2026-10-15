@@ -97,7 +97,7 @@ export interface RfwApi {
   onExternalChange(cb: (note: NoteFile) => void): void
   /** cb resolves true when the window may close. */
   onBeforeClose(cb: () => Promise<boolean>): void
-  /** Resolves to whether the window was fullscreen before the change. */
+  /** Resolves to whether the user (not the app) had the window fullscreen before the change. */
   setFullScreen(on: boolean): Promise<boolean>
   onFullScreenLeft(cb: () => void): void
 }
