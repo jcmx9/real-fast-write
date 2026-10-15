@@ -1,17 +1,24 @@
 import { foldEffect, foldedRanges, unfoldEffect } from '@codemirror/language'
 import type { EditorState, Transaction, TransactionSpec } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
-import { activeEntry, type OutlineEntry, outlineEntries } from './outline'
+import { activeEntry, foldsAt, type OutlineEntry, outlineEntries } from './outline'
 
-/** Folds or unfolds the entry's section; a cursor inside the folded range moves to the heading end. */
+/**
+ * Unfolds the folds stored at the heading line end (their real ranges, which may differ from
+ * the recomputed section after edits), or folds the current section range. The editor's
+ * folds decide, not the possibly stale `entry.folded`, so a click never stacks a second fold.
+ * A cursor strictly inside a new fold moves to the heading end.
+ */
 export function toggleEntryFold(view: EditorView, entry: OutlineEntry): void {
-  const { fold } = entry
-  // A stale entry (rendered before the latest edit) must not fold an arbitrary range.
-  if (fold === null || fold.to > view.state.doc.length) return
-  if (entry.folded) {
-    view.dispatch({ effects: unfoldEffect.of(fold) })
+  // A stale entry (rendered before the latest edit) must not act on an arbitrary range.
+  if (entry.to > view.state.doc.length) return
+  const existing = foldsAt(view.state, entry.to)
+  if (existing.length > 0) {
+    view.dispatch({ effects: existing.map((r) => unfoldEffect.of(r)) })
     return
   }
+  const { fold } = entry
+  if (fold === null || fold.from !== entry.to || fold.to > view.state.doc.length) return
   const spec: TransactionSpec = { effects: foldEffect.of(fold) }
   const head = view.state.selection.main.head
   if (head > fold.from && head < fold.to) spec.selection = { anchor: entry.to }

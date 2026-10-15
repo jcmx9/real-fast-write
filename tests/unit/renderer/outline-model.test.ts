@@ -67,6 +67,39 @@ describe('outlineEntries', () => {
   })
 })
 
+describe('outlineEntries folded state follows CodeMirror after the section changes', () => {
+  const foldA = (text: string) => {
+    const state = st(text)
+    const [a] = outlineEntries(state)
+    return state.update({ effects: foldEffect.of(a?.fold as { from: number; to: number }) }).state
+  }
+  it('stays folded when text is typed right below the folded section', () => {
+    const doc = '# A\ntext\n\n# B\nb\n'
+    const state = foldA(doc)
+    const next = state.update({ changes: { from: doc.indexOf('\n# B'), insert: 'more' } }).state
+    expect(outlineEntries(next)[0]?.folded).toBe(true)
+  })
+  it('stays folded when the next heading is deleted', () => {
+    const doc = '# A\ntext\n# B\nb\n'
+    const state = foldA(doc)
+    const at = doc.indexOf('# B')
+    const next = state.update({ changes: { from: at, to: at + 4 } }).state
+    expect(outlineEntries(next)[0]?.folded).toBe(true)
+  })
+  it('stays folded when a block is pasted below the fold', () => {
+    const doc = '# A\ntext\n\n# B\n'
+    const state = foldA(doc)
+    const next = state.update({
+      changes: { from: doc.indexOf('\n# B'), insert: 'p1\np2\n' },
+    }).state
+    expect(outlineEntries(next)[0]?.folded).toBe(true)
+  })
+  it('a folded H1 does not mark its children as folded', () => {
+    const [a] = outlineEntries(foldA('# A\nx\n## a1\ny\n'))
+    expect(a?.children[0]?.folded).toBe(false)
+  })
+})
+
 describe('activeEntry', () => {
   it('is the last entry starting at or before pos, children included', () => {
     const entries = outlineEntries(st('# A\nx\n## a1\ny\n# B\n'))

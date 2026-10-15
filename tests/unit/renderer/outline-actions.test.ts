@@ -82,6 +82,37 @@ describe('toggleEntryFold', () => {
   })
 })
 
+describe('toggleEntryFold after the folded section changed', () => {
+  const DRIFT = '# A\ntext\n\n# B\nb\n'
+  function drifted(): EditorView {
+    const view = mkView(DRIFT)
+    toggleEntryFold(view, first(view))
+    view.dispatch({ changes: { from: DRIFT.indexOf('\n# B'), insert: 'more' } })
+    return view
+  }
+  it('the chevron unfolds the mapped fold in one click', () => {
+    const view = drifted()
+    expect(folds(view)).toHaveLength(1)
+    expect(first(view).folded).toBe(true)
+    toggleEntryFold(view, first(view))
+    expect(folds(view)).toEqual([])
+    expect(first(view).folded).toBe(false)
+  })
+  it('never stacks a second fold on the same heading', () => {
+    const view = drifted()
+    toggleEntryFold(view, first(view))
+    toggleEntryFold(view, first(view))
+    const a = first(view)
+    expect(folds(view)).toEqual([[a.fold?.from, a.fold?.to]])
+    expect(a.folded).toBe(true)
+  })
+  it('a stale "unfolded" entry does not add a second fold', () => {
+    const view = drifted()
+    toggleEntryFold(view, { ...first(view), folded: false })
+    expect(folds(view)).toEqual([])
+  })
+})
+
 describe('jumpToEntry', () => {
   it('puts the cursor at the heading end, focuses the editor and keeps the fold', () => {
     const view = mkView()

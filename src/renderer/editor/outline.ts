@@ -34,12 +34,18 @@ function headingText(state: EditorState, from: number, to: number, setext: boole
   return text.trim() || '(ohne Titel)'
 }
 
-function isFolded(state: EditorState, fold: { from: number; to: number }): boolean {
-  let found = false
-  foldedRanges(state).between(fold.from, fold.to, (from, to) => {
-    if (from === fold.from && to === fold.to) found = true
+/**
+ * Folds that start at `pos` (a heading line end), as stored in the editor. Like CodeMirror's
+ * `findFold`, a section counts as folded by the fold that starts on its heading line, not by
+ * an exact range match: a stored fold is mapped through edits, while the section's current
+ * range may have grown or shrunk below it.
+ */
+export function foldsAt(state: EditorState, pos: number): { from: number; to: number }[] {
+  const out: { from: number; to: number }[] = []
+  foldedRanges(state).between(pos, pos, (from, to) => {
+    if (from === pos) out.push({ from, to })
   })
-  return found
+  return out
 }
 
 /**
@@ -62,7 +68,7 @@ export function outlineEntries(state: EditorState): OutlineEntry[] {
       from: line.from,
       to: line.to,
       fold,
-      folded: fold ? isFolded(state, fold) : false,
+      folded: foldsAt(state, line.to).length > 0,
       children: [],
     }
     const last = out.at(-1)
