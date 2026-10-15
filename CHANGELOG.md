@@ -15,3 +15,6 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - External-change conflict banner that pauses autosave for that note
 - PDF export via rf-document with readable error messages
 - CI on macOS, Windows and Linux with a real rf-document export
+- Preview in the PDF look: rf-document fonts, headings, lists with squares, clickable checkboxes, alert boxes, striped tables, code blocks with Typst colours
+- Tables like the PDF (columns, alignment, stripes), editable as Markdown on click
+- Code/Preview switch, YAML header that collapses into the PDF title block, section folding (single and all)
