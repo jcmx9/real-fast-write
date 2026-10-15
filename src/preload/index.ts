@@ -24,6 +24,7 @@ const api: RfwApi = {
     ipcRenderer.on(Ch.externalChange, (_e, note: NoteFile) => cb(note))
   },
   setFullScreen: (on) => ipcRenderer.invoke(Ch.setFullScreen, on),
+  listSnippets: () => ipcRenderer.invoke(Ch.listSnippets),
   onFullScreenLeft: (cb) => {
     ipcRenderer.on(Ch.fullScreenLeft, () => cb())
   },
