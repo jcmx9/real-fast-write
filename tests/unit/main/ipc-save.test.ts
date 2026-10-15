@@ -171,4 +171,19 @@ describe('saveNote base check', () => {
     expect(await save(note, 'x', 42 as unknown as string)).toMatchObject({ ok: false })
     expect(await readFile(note, 'utf8')).toBe('geladen')
   })
+
+  it('follows an external case-only rename and returns the new spelling', async () => {
+    const base = await load()
+    const { rename, stat } = await import('node:fs/promises')
+    await rename(note, join(dir, 'A.md'))
+    const insensitive = await stat(note).then(
+      () => true,
+      () => false,
+    )
+    if (!insensitive) return
+    const res = await save(note, 'getippt', base)
+    expect(res).toEqual({ ok: true, hash: hashOf('getippt'), path: join(dir, 'A.md') })
+    expect(await readdir(dir)).toContain('A.md')
+    expect(await readFile(join(dir, 'A.md'), 'utf8')).toBe('getippt')
+  })
 })

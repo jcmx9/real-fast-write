@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, realpath, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rename, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -76,4 +76,42 @@ describe('AppContext paths', () => {
     })
     expect(ctx.session.tabs).toEqual([{ path: join(real, 'a.md'), headerHidden: false }])
   })
+
+  it('follows an external case-only rename of an open note instead of refusing it', async () => {
+    const ctx = new AppContext(userData, userData)
+    await ctx.openPaths([join(real, 'a.md')])
+    await rename(join(real, 'a.md'), join(real, 'A.md'))
+    if (!(await caseInsensitive(real))) return // the old spelling is simply gone there
+
+    expect(await ctx.assertAllowed(join(real, 'a.md'))).toBe(join(real, 'A.md'))
+    expect(ctx.isAllowed(join(real, 'A.md'))).toBe(true)
+  })
+
+  it('follows a case-only rename of a parent folder', async () => {
+    const ctx = new AppContext(userData, userData)
+    await mkdir(join(real, 'ordner'))
+    await writeFile(join(real, 'ordner', 'n.md'), 'n')
+    await ctx.openPaths([join(real, 'ordner', 'n.md')])
+    await rename(join(real, 'ordner'), join(real, 'Ordner'))
+    if (!(await caseInsensitive(real))) return
+
+    expect(await ctx.assertAllowed(join(real, 'ordner', 'n.md'))).toBe(join(real, 'Ordner', 'n.md'))
+  })
+
+  it('still refuses a spelling that was never allowed', async () => {
+    const ctx = new AppContext(userData, userData)
+    await ctx.openPaths([join(real, 'a.md')])
+    if (!(await caseInsensitive(real))) return
+    await writeFile(join(real, 'b.md'), 'b')
+    await expect(ctx.assertAllowed(join(real, 'B.md'))).rejects.toThrow('Zugriff verweigert')
+  })
 })
+
+/** True when the folder treats `x` and `X` as the same name (macOS/Windows defaults). */
+async function caseInsensitive(folder: string): Promise<boolean> {
+  await writeFile(join(folder, 'probe-case'), '')
+  return stat(join(folder, 'PROBE-CASE')).then(
+    () => true,
+    () => false,
+  )
+}

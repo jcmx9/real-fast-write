@@ -126,6 +126,11 @@ export function registerIpc(ctx: AppContext): void {
           return { ok: false, conflict: found.change }
         }
         if (ctx.reserved.delete(p)) void ctx.rememberRecent(p).catch(logSessionError)
+        // The note's spelling changed outside (case-only rename): the tab follows it.
+        if (p !== path) {
+          void ctx.renamedRecent(str(path), p).catch(logSessionError)
+          return { ok: true, hash, path: p }
+        }
         return { ok: true, hash }
       } catch (err) {
         return { ok: false, error: message(err) }

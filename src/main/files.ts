@@ -257,9 +257,14 @@ async function isFree(path: string): Promise<boolean> {
   }
 }
 
-async function sameFile(a: string, b: string): Promise<boolean> {
-  const [sa, sb] = await Promise.all([fs.stat(a, { bigint: true }), fs.stat(b, { bigint: true })])
-  return sa.ino === sb.ino && sa.dev === sb.dev
+/** Both paths name the same existing file (same device and inode); false if either is missing. */
+export async function sameFile(a: string, b: string): Promise<boolean> {
+  try {
+    const [sa, sb] = await Promise.all([fs.stat(a, { bigint: true }), fs.stat(b, { bigint: true })])
+    return sa.ino === sb.ino && sa.dev === sb.dev
+  } catch {
+    return false
+  }
 }
 
 async function unlinkWithRetry(path: string, sleep: AtomicDeps['sleep']): Promise<void> {
@@ -289,7 +294,7 @@ export async function renameNote(
   if (to.toLowerCase() === from.toLowerCase()) {
     // Case-only rename: `to` may be the same file on a case-insensitive FS.
     // If sameFile cannot prove identity, refuse.
-    if (!(await isFree(to)) && !(await sameFile(from, to).catch(() => false))) throw taken()
+    if (!(await isFree(to)) && !(await sameFile(from, to))) throw taken()
     await fs.rename(from, to)
     return to
   }

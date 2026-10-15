@@ -62,7 +62,8 @@ export interface StartupState {
 }
 
 export type SaveResult =
-  | { ok: true; hash: string }
+  /** path: the note's canonical path when it differs from the one passed (renamed outside). */
+  | { ok: true; hash: string; path?: string }
   | { ok: false; error: string }
   /** Refused without writing: the file changed outside since the tab's base. */
   | { ok: false; conflict: ExternalChange }

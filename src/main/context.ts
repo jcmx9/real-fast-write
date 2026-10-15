@@ -14,7 +14,7 @@ import type {
 } from '../shared/types'
 import { addRecent, replaceRecent } from './cli'
 import { runRfDocument } from './export'
-import { canonicalPath, canonicalPaths } from './files'
+import { canonicalPath, canonicalPaths, sameFile } from './files'
 import { fontDir, fontStatus } from './fonts'
 import { FullScreenOwner } from './fullscreen'
 import { isExecutableFile, locateRfDocument } from './locate'
@@ -86,11 +86,24 @@ export class AppContext {
     return this.allowed.has(path)
   }
 
-  /** Canonicalises `path` and returns the canonical form if it is allowed, else throws. */
+  /**
+   * Canonicalises `path` and returns the canonical form if it is allowed, else throws.
+   * An allowed path whose canonical spelling now differs only in case (the note or a parent
+   * folder was renamed outside, e.g. `a.md` → `A.md` in Finder or Explorer) is the same file:
+   * the new spelling is allowed too and returned, so the caller can follow it.
+   */
   async assertAllowed(path: string): Promise<string> {
     const canonical = await canonicalPath(path)
-    if (!this.allowed.has(canonical)) throw new Error(`Zugriff verweigert: ${path}`)
-    return canonical
+    if (this.allowed.has(canonical)) return canonical
+    if (
+      this.allowed.has(path) &&
+      canonical.toLowerCase() === path.toLowerCase() &&
+      (await sameFile(path, canonical))
+    ) {
+      this.allow([canonical])
+      return canonical
+    }
+    throw new Error(`Zugriff verweigert: ${path}`)
   }
 
   createWindow(): void {

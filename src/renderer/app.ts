@@ -647,13 +647,16 @@ export class App {
       this.refresh()
       return false
     }
+    // A case-only rename outside (a.md → A.md): the tab follows the file's new spelling.
+    const moved = res.path !== undefined && res.path !== tab.path
+    if (moved && res.path) this.store.setPath(tab.id, res.path)
     const firstSave = !tab.onDisk
     this.store.markSaved(tab.id, doc)
     this.savedHashes.set(tab.id, res.hash)
     this.overwrite.delete(tab.id)
     this.unwritten.delete(tab.id)
     this.saveErrors.delete(tab.id)
-    if (firstSave) this.syncMain()
+    if (firstSave || moved) this.syncMain()
     this.refresh()
     return true
   }
