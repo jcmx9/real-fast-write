@@ -1,8 +1,8 @@
 import { readdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { expect, test } from '@playwright/test'
+import { expect } from '@playwright/test'
 import { makeFakeRfDocument } from '../helpers/fake-rf-document'
-import { clickMenu, launch, makeDirs, shot } from './helpers'
+import { clickMenu, launch, makeDirs, shot, test } from './helpers'
 
 test('shows rf-document stderr when the export fails', async () => {
   const dirs = await makeDirs()

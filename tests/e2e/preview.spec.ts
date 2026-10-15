@@ -1,9 +1,9 @@
 import { access, copyFile, readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { expect, test } from '@playwright/test'
+import { expect } from '@playwright/test'
 import { fontDir } from '../../src/main/fonts'
-import { clickMenu, launch, makeDirs, shot, waitForFile } from './helpers'
+import { clickMenu, launch, makeDirs, shot, test, waitForFile } from './helpers'
 
 const FIXTURE = join(__dirname, '..', 'fixtures', 'preview.md')
 

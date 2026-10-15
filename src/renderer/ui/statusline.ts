@@ -1,10 +1,12 @@
-export type SaveState = 'saved' | 'dirty' | 'new' | 'error'
+/** held: an external change blocks saving until the user answers the banner. */
+export type SaveState = 'saved' | 'dirty' | 'new' | 'error' | 'held'
 
 export const SAVE_STATE_LABEL: Record<SaveState, string> = {
   saved: 'Gespeichert',
   dirty: 'Ungespeichert',
   new: 'Neu – wird beim ersten Tippen angelegt',
   error: 'Speichern fehlgeschlagen',
+  held: 'Nicht gespeichert',
 }
 
 export class StatusLine {
@@ -31,9 +33,9 @@ export class StatusLine {
 
   render(file: string | null, state: SaveState, error: string | null): void {
     this.name.textContent = file ?? ''
-    this.state.textContent =
-      state === 'error' && error ? `${SAVE_STATE_LABEL.error}: ${error}` : SAVE_STATE_LABEL[state]
-    this.state.classList.toggle('error', state === 'error')
+    this.state.textContent = saveText(state, error)
+    // A hold is as prominent as a failed save.
+    this.state.classList.toggle('error', state === 'error' || state === 'held')
     this.exportButton.hidden = file === null
   }
 
@@ -43,4 +45,11 @@ export class StatusLine {
     this.exportButton.classList.toggle('busy', on)
     this.exportButton.textContent = on ? 'Exportiere …' : 'PDF exportieren'
   }
+}
+
+/** The status text; a reason is appended for a failed save or a hold. */
+export function saveText(state: SaveState, reason: string | null): string {
+  return (state === 'error' || state === 'held') && reason
+    ? `${SAVE_STATE_LABEL[state]}: ${reason}`
+    : SAVE_STATE_LABEL[state]
 }

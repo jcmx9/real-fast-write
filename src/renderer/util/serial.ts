@@ -19,3 +19,46 @@ export class SerialQueue {
     return result
   }
 }
+
+/**
+ * Coalesces toggles of an on/off state whose switch takes a while to settle (a fullscreen
+ * request still animating). A toggle while a switch is in flight is not dropped: the latest
+ * wanted state is remembered and applied once the switch settles, compared with the state at
+ * that moment, so an even number of extra toggles is a no-op (last intent wins).
+ */
+export class LatestToggle {
+  private running = false
+  /** Wanted state from toggles during the running switch; null = none. */
+  private wanted: boolean | null = null
+
+  constructor(
+    private readonly state: () => boolean,
+    private readonly apply: (on: boolean) => Promise<void>,
+  ) {}
+
+  /** The state a toggle during the running switch still wants; null when none is pending. */
+  get pendingWant(): boolean | null {
+    return this.running ? this.wanted : null
+  }
+
+  /** Settles when this toggle (and any toggles coalesced into it) has been applied. */
+  async toggle(): Promise<void> {
+    if (this.running) {
+      this.wanted = !(this.wanted ?? this.state())
+      return
+    }
+    this.running = true
+    try {
+      let next: boolean | null = !this.state()
+      while (next !== null) {
+        await this.apply(next)
+        const wanted: boolean | null = this.wanted
+        this.wanted = null
+        next = wanted === null || wanted === this.state() ? null : wanted
+      }
+    } finally {
+      this.running = false
+      this.wanted = null
+    }
+  }
+}

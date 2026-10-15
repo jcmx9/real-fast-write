@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { SerialQueue } from '../../../src/renderer/util/serial'
+import { LatestToggle, SerialQueue } from '../../../src/renderer/util/serial'
 
 const tick = () => new Promise((r) => setTimeout(r))
 
@@ -51,5 +51,96 @@ describe('SerialQueue', () => {
     release()
     await p
     expect(q.busy).toBe(false)
+  })
+})
+
+describe('LatestToggle', () => {
+  /** A toggle whose apply() only settles when release() is called. */
+  function setup(initial = false) {
+    let on = initial
+    const applied: boolean[] = []
+    const releases: Array<() => void> = []
+    const t = new LatestToggle(
+      () => on,
+      (want) => {
+        applied.push(want)
+        on = want // the mode switches at once; the fullscreen request is what is in flight
+        return new Promise<void>((r) => releases.push(r))
+      },
+    )
+    const release = async () => {
+      releases.shift()?.()
+      await tick()
+    }
+    return { t, applied, release, state: () => on, setState: (v: boolean) => (on = v) }
+  }
+
+  it('toggles once when idle', async () => {
+    const s = setup()
+    const done = s.t.toggle()
+    expect(s.applied).toEqual([true])
+    await s.release()
+    await done
+    expect(s.state()).toBe(true)
+  })
+
+  it('remembers a toggle during an in-flight request and applies it once settled', async () => {
+    const s = setup()
+    const done = s.t.toggle()
+    void s.t.toggle() // pressed again during the enter animation
+    expect(s.applied).toEqual([true])
+    await s.release()
+    expect(s.applied).toEqual([true, false])
+    await s.release()
+    await done
+    expect(s.state()).toBe(false)
+  })
+
+  it('an even number of extra toggles is a no-op (last intent wins)', async () => {
+    const s = setup()
+    const done = s.t.toggle()
+    void s.t.toggle()
+    void s.t.toggle()
+    await s.release()
+    await done
+    expect(s.applied).toEqual([true])
+    expect(s.state()).toBe(true)
+  })
+
+  it('compares with the state at settle time (e.g. Esc left meanwhile)', async () => {
+    const s = setup()
+    const done = s.t.toggle()
+    void s.t.toggle() // wants false ...
+    s.setState(false) // ... and Esc already left Present
+    await s.release()
+    await done
+    expect(s.applied).toEqual([true])
+  })
+
+  it('exposes the state a coalesced toggle still wants (null when none)', async () => {
+    const s = setup()
+    const done = s.t.toggle()
+    expect(s.t.pendingWant).toBeNull()
+    void s.t.toggle()
+    expect(s.t.pendingWant).toBe(false)
+    void s.t.toggle()
+    expect(s.t.pendingWant).toBe(true)
+    await s.release()
+    await done
+    expect(s.t.pendingWant).toBeNull()
+  })
+
+  it('a failing request does not block later toggles', async () => {
+    let calls = 0
+    const t = new LatestToggle(
+      () => false,
+      async () => {
+        calls++
+        throw new Error('boom')
+      },
+    )
+    await expect(t.toggle()).rejects.toThrow('boom')
+    await expect(t.toggle()).rejects.toThrow('boom')
+    expect(calls).toBe(2)
   })
 })

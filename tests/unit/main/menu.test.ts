@@ -1,6 +1,6 @@
 import type { MenuItemConstructorOptions } from 'electron'
 import { describe, expect, it, vi } from 'vitest'
-import { buildMenuTemplate, type MenuDeps } from '../../../src/main/menu'
+import { buildMenuTemplate, type MenuDeps, PresentKeyGuard } from '../../../src/main/menu'
 
 const deps = (over: Partial<MenuDeps> = {}): MenuDeps => ({
   platform: 'darwin',
@@ -77,6 +77,21 @@ describe('buildMenuTemplate', () => {
     expect(d.command).toHaveBeenCalledTimes(3)
   })
 
+  it('two deliberate presses 300 ms apart both toggle Present', () => {
+    let now = 1000
+    const d = deps({ now: () => now })
+    const item = byId(buildMenuTemplate(d), 'toggle-present')
+    if (!item) throw new Error('menu item not found')
+    const key = () =>
+      (item.click as unknown as (a: unknown, b: unknown, e: unknown) => void)(null, null, {
+        triggeredByAccelerator: true,
+      })
+    key()
+    now += 300
+    key()
+    expect(d.command).toHaveBeenCalledTimes(2)
+  })
+
   it('has an app menu on macOS and a quit item elsewhere', () => {
     expect(buildMenuTemplate(deps())[0]?.role).toBe('appMenu')
     const winItems = flatten(buildMenuTemplate(deps({ platform: 'win32' })))
@@ -137,5 +152,116 @@ describe('buildMenuTemplate', () => {
       'zoom-out',
       'zoom-reset',
     ])
+  })
+})
+
+describe('PresentKeyGuard', () => {
+  const input = (over: Partial<Parameters<PresentKeyGuard['onInput']>[0]> = {}) => ({
+    type: 'keyDown',
+    key: 'P',
+    code: 'KeyP',
+    isAutoRepeat: false,
+    shift: true,
+    control: false,
+    alt: false,
+    meta: true,
+    ...over,
+  })
+
+  /** One OS key event: before-input-event, then (for keyDown) the accelerator click. */
+  function setup(mac = true) {
+    let now = 1000
+    const d = deps({ platform: mac ? 'darwin' : 'win32' })
+    const guard = new PresentKeyGuard(mac, () => now)
+    const item = byId(buildMenuTemplate({ ...d, presentKey: guard }), 'toggle-present')
+    if (!item) throw new Error('menu item not found')
+    const accel = () =>
+      (item.click as unknown as (a: unknown, b: unknown, e: unknown) => void)(null, null, {
+        triggeredByAccelerator: true,
+      })
+    const keyDown = (repeat: boolean, over = {}) => {
+      guard.onInput(input({ isAutoRepeat: repeat, ...over }))
+      accel()
+    }
+    const keyUp = () => guard.onInput(input({ type: 'keyUp' }))
+    const wait = (ms: number) => {
+      now += ms
+    }
+    return { d, guard, keyDown, keyUp, wait, accel }
+  }
+
+  it('a held shortcut toggles exactly once, whatever the repeat timing', () => {
+    const s = setup()
+    s.keyDown(false)
+    s.wait(600) // initial repeat delay longer than the fallback window
+    for (let i = 0; i < 20; i++) {
+      s.keyDown(true)
+      s.wait(40)
+    }
+    expect(s.d.command).toHaveBeenCalledTimes(1)
+  })
+
+  it('a fresh press after keyUp toggles again', () => {
+    const s = setup()
+    s.keyDown(false)
+    s.wait(500)
+    s.keyDown(true)
+    s.keyUp()
+    s.wait(1000)
+    s.keyDown(false)
+    expect(s.d.command).toHaveBeenCalledTimes(2)
+  })
+
+  it('a deliberate double press (keyUp in between) toggles twice, even within 250 ms', () => {
+    const s = setup()
+    s.keyDown(false)
+    s.wait(60)
+    s.keyUp()
+    s.wait(60)
+    s.keyDown(false)
+    expect(s.d.command).toHaveBeenCalledTimes(2)
+  })
+
+  it('uses Ctrl (not Meta) as the modifier off macOS', () => {
+    const s = setup(false)
+    s.keyDown(false, { meta: false, control: true })
+    s.wait(600)
+    s.keyDown(true, { meta: false, control: true })
+    expect(s.d.command).toHaveBeenCalledTimes(1)
+  })
+
+  it('ignores other keys and falls back to the 250 ms window without matching input', () => {
+    const s = setup()
+    // Not the shortcut (Alt held, other key): no input info for the accelerator clicks.
+    s.keyDown(true, { alt: true })
+    s.wait(1000)
+    s.keyDown(true, { key: 'o', code: 'KeyO' })
+    expect(s.d.command).toHaveBeenCalledTimes(2)
+    s.wait(40)
+    s.accel() // no input observed, 40 ms after the last press: fallback treats it as repeat
+    expect(s.d.command).toHaveBeenCalledTimes(2)
+    s.wait(300)
+    s.accel()
+    expect(s.d.command).toHaveBeenCalledTimes(3)
+  })
+
+  it('matches the physical P key on non-Latin layouts (key is not p)', () => {
+    const s = setup(false)
+    const cyrillic = { key: 'З', code: 'KeyP', meta: false, control: true }
+    s.keyDown(false, cyrillic)
+    s.wait(600) // past the fallback window: only the repeat flag can tell
+    s.keyDown(true, cyrillic)
+    expect(s.d.command).toHaveBeenCalledTimes(1)
+  })
+
+  it('input seen long before a click is stale and not used', () => {
+    const s = setup()
+    s.keyDown(false)
+    s.wait(1000)
+    // A repeat keyDown whose click never came (e.g. swallowed), then a click much later.
+    s.guard.onInput(input({ isAutoRepeat: true }))
+    s.wait(5000)
+    s.accel()
+    expect(s.d.command).toHaveBeenCalledTimes(2)
   })
 })
