@@ -13,7 +13,7 @@
 
 ## Status
 
-In development. Available: tabs, autosave with atomic writes, rename, session restore, detection of external changes and PDF export via rf-document, and the PDF look in the preview. Presentation mode (fullscreen, larger text, info line) is available. Not yet available: snippets and one-line installation.
+In development. Available: tabs, autosave with atomic writes, rename, session restore, detection of external changes and PDF export via rf-document, and the PDF look in the preview. Presentation mode (fullscreen, larger text, info line) and snippets are available. Not yet available: one-line installation.
 
 ## Prerequisites (development)
 
@@ -54,7 +54,9 @@ The preview uses rf-document's fonts from its install folder and otherwise falls
 
 ## Snippets
 
-Type `:` and at least one letter (e.g. `:mee`) to show the snippet list; Ctrl+Space shows all of them after a bare `:`. Enter or Tab inserts the snippet, Tab / Shift+Tab move through its fields. Prose such as `Hinweis:` or `:D` triggers nothing.
+Type `:` at the start of a line or after a space, plus at least one letter (e.g. `:mee`), to show the snippet list; Ctrl+Space shows all of them after a bare `:`. On macOS, Ctrl+Space may be taken by input-source switching; then just type `:` and a letter. Enter or Tab inserts the snippet, Tab / Shift+Tab move through its fields. Prose such as `Hinweis:`, `10:30` or `:D` triggers nothing.
+
+Inside a snippet, Esc first ends the field mode; in presentation mode only a further Esc leaves the presentation. Header snippets (`:meeting`, `:telefonnotiz`, `:header`) keep the YAML header open in presentation mode while a field in it is active; afterwards it collapses to the title block. Following lines of a multi-line snippet take the indentation of the current line, and tabs at the start of a template line become two spaces.
 
 | Snippet | Content |
 |---------|---------|
@@ -64,7 +66,7 @@ Type `:` and at least one letter (e.g. `:mee`) to show the snippet list; Ctrl+Sp
 | `:header` | YAML header with all rf-document keys |
 | `:newpage` | Page break `<!-- pagebreak -->` |
 
-Own snippets are files `name.tpl.md` in the snippet folder (default `~/Documents/rf-write/snippets`, setting `snippetFolder`). An own snippet with the same name replaces the built-in one. New files are picked up the next time the window gets focus. Supported syntax: `$1`, `${1:default}`, `$0` (final position) and `$CURRENT_YEAR`, `$CURRENT_MONTH`, `$CURRENT_DATE`, `$CURRENT_HOUR`, `$CURRENT_MINUTE`, `$CURRENT_SECOND`.
+Own snippets are files `name.tpl.md` in the snippet folder (default `~/Documents/rf-write/snippets`, setting `snippetFolder`). An own snippet with the same name replaces the built-in one. New files are picked up the next time the window gets focus. Supported syntax: `$1`, `${1:default}`, `$0` (final position) and `$CURRENT_YEAR`, `$CURRENT_MONTH`, `$CURRENT_DATE`, `$CURRENT_HOUR`, `$CURRENT_MINUTE`, `$CURRENT_SECOND` (also in the form `${CURRENT_YEAR}`). `\$` gives a literal `$`, `\\` a backslash, and inside a default `\}` gives a literal `}`.
 
 ## Development
 
