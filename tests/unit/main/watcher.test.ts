@@ -1,9 +1,9 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { hashBytes, noteBytes, writeNote } from '../../../src/main/files'
-import { NoteWatcher } from '../../../src/main/watcher'
+import { NoteWatcher, type WatcherDeps } from '../../../src/main/watcher'
 import type { ExternalChange, NoteFile } from '../../../src/shared/types'
 
 let dir: string
@@ -337,5 +337,121 @@ describe('NoteWatcher read errors', () => {
     await writeFile(path, 'z')
     await waitFor(() => events.length > 1)
     expect(events[1]).toMatchObject({ kind: 'changed', note: { text: 'z' } })
+  })
+})
+
+describe('NoteWatcher re-arm', () => {
+  type Listener = (event: string, name: string) => void
+  let attempts: string[]
+  let fails: number
+  let live: { close: ReturnType<typeof vi.fn>; fire: () => void; listener: Listener }[]
+  const reads: string[] = []
+
+  function fakeWatch(failures: number): WatcherDeps['watch'] {
+    fails = failures
+    return ((d: string, listener: Listener) => {
+      attempts.push(d)
+      if (fails > 0) {
+        fails -= 1
+        throw new Error('EACCES')
+      }
+      const handlers: Record<string, () => void> = {}
+      const w = {
+        close: vi.fn(),
+        on: (ev: string, fn: () => void) => {
+          handlers[ev] = fn
+          return w
+        },
+        fire: () => handlers.error?.(),
+        listener,
+      }
+      live.push(w)
+      return w
+    }) as unknown as WatcherDeps['watch']
+  }
+
+  function make(failures: number): NoteWatcher {
+    reads.length = 0
+    return new NoteWatcher(
+      (c) => events.push(c),
+      100,
+      async (p) => {
+        reads.push(p)
+        return Buffer.from('x')
+      },
+      { watch: fakeWatch(failures) },
+    )
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    attempts = []
+    live = []
+  })
+  afterEach(() => vi.useRealTimers())
+
+  it('retries a throwing watch() at 1 s and 2 s, then checks every file once', async () => {
+    const w = make(2)
+    w.setFiles([join(dir, 'a.md'), join(dir, 'b.md')])
+    expect(attempts).toHaveLength(1)
+    vi.advanceTimersByTime(999)
+    expect(attempts).toHaveLength(1)
+    vi.advanceTimersByTime(1)
+    expect(attempts).toHaveLength(2)
+    vi.advanceTimersByTime(1999)
+    expect(attempts).toHaveLength(2)
+    expect(reads).toEqual([])
+    vi.advanceTimersByTime(1)
+    expect(attempts).toHaveLength(3)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(reads.sort()).toEqual([join(dir, 'a.md'), join(dir, 'b.md')])
+    vi.advanceTimersByTime(60_000)
+    expect(attempts).toHaveLength(3)
+    w.close()
+  })
+
+  it('caps the backoff at 30 s', () => {
+    const w = make(100)
+    w.setFiles([join(dir, 'a.md')])
+    let total = 0
+    for (const delay of [1000, 2000, 4000, 8000, 16000, 30000, 30000]) {
+      vi.advanceTimersByTime(delay - 1)
+      const before = attempts.length
+      vi.advanceTimersByTime(1)
+      expect(attempts.length).toBe(before + 1)
+      total += delay
+    }
+    expect(total).toBeGreaterThan(0)
+    w.close()
+  })
+
+  it('re-arms after an error event and re-checks the files', async () => {
+    const w = make(0)
+    w.setFiles([join(dir, 'a.md')])
+    expect(live).toHaveLength(1)
+    live[0]?.fire()
+    expect(live[0]?.close).toHaveBeenCalled()
+    vi.advanceTimersByTime(1000)
+    expect(live).toHaveLength(2)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(reads).toEqual([join(dir, 'a.md')])
+    w.close()
+  })
+
+  it('stops retrying for a folder that is no longer needed', () => {
+    const w = make(100)
+    w.setFiles([join(dir, 'a.md')])
+    w.setFiles([])
+    vi.advanceTimersByTime(120_000)
+    expect(attempts).toHaveLength(1)
+    w.close()
+  })
+
+  it('close() cancels pending retries', () => {
+    const w = make(100)
+    w.setFiles([join(dir, 'a.md')])
+    w.close()
+    vi.advanceTimersByTime(120_000)
+    expect(attempts).toHaveLength(1)
   })
 })

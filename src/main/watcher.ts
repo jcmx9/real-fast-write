@@ -11,17 +11,40 @@ interface Known {
   failure?: 'deleted' | 'error'
 }
 
+/** Injectable for tests. */
+export interface WatcherDeps {
+  watch: typeof watch
+  setTimeout: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>
+  clearTimeout: (handle: ReturnType<typeof setTimeout>) => void
+}
+
+const RETRY_BASE_MS = 1000
+const RETRY_MAX_MS = 30_000
+
 export class NoteWatcher {
   private readonly dirs = new Map<string, FSWatcher>()
   private files = new Set<string>()
   private readonly known = new Map<string, Known>()
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>()
+  /** Pending re-arm per folder whose watcher failed, with the number of failed attempts so far. */
+  private readonly retries = new Map<
+    string,
+    { timer: ReturnType<typeof setTimeout>; attempt: number }
+  >()
+  private readonly deps: WatcherDeps
 
   constructor(
     private readonly onChange: (change: ExternalChange) => void,
     private readonly debounceMs = 200,
     private readonly read: (path: string) => Promise<Buffer> = (path) => fs.readFile(path),
-  ) {}
+    deps: Partial<WatcherDeps> = {},
+  ) {
+    this.deps = {
+      watch: deps.watch ?? watch,
+      setTimeout: deps.setTimeout ?? ((fn, ms) => setTimeout(fn, ms)),
+      clearTimeout: deps.clearTimeout ?? ((h) => clearTimeout(h)),
+    }
+  }
 
   setFiles(paths: readonly string[]): void {
     const previous = this.files
@@ -51,21 +74,51 @@ export class NoteWatcher {
         this.dirs.delete(dir)
       }
     }
-    for (const dir of needed) {
-      if (this.dirs.has(dir)) continue
-      try {
-        const w = watch(dir, (_event, name) => {
-          if (name) this.ping(join(dir, name.toString()))
-        })
-        w.on('error', () => {
-          w.close()
-          this.dirs.delete(dir)
-        })
-        this.dirs.set(dir, w)
-      } catch {
-        // Folder vanished or is not watchable: the next save surfaces any problem.
-      }
+    for (const [dir, retry] of this.retries) {
+      if (needed.has(dir)) continue
+      this.deps.clearTimeout(retry.timer)
+      this.retries.delete(dir)
     }
+    for (const dir of needed) {
+      if (this.dirs.has(dir) || this.retries.has(dir)) continue
+      this.arm(dir, 0)
+    }
+  }
+
+  /** Starts watching a folder; on failure schedules a retry with backoff while it is needed. */
+  private arm(dir: string, attempt: number): void {
+    let w: FSWatcher
+    try {
+      w = this.deps.watch(dir, (_event, name) => {
+        if (name) this.ping(join(dir, name.toString()))
+      })
+    } catch {
+      // Folder vanished or is not watchable (yet): try again shortly.
+      this.scheduleRetry(dir, attempt)
+      return
+    }
+    w.on('error', () => {
+      w.close()
+      if (this.dirs.get(dir) !== w) return
+      this.dirs.delete(dir)
+      this.scheduleRetry(dir, 0)
+    })
+    this.dirs.set(dir, w)
+    if (attempt > 0) {
+      // Changes during the gap produced no events: look at every file of the folder once.
+      for (const p of this.files) if (dirname(p) === dir) void this.check(p)
+    }
+  }
+
+  private scheduleRetry(dir: string, attempt: number): void {
+    const delay = Math.min(RETRY_BASE_MS * 2 ** attempt, RETRY_MAX_MS)
+    const timer = this.deps.setTimeout(() => {
+      this.retries.delete(dir)
+      if (!this.dirs.has(dir) && [...this.files].some((p) => dirname(p) === dir)) {
+        this.arm(dir, attempt + 1)
+      }
+    }, delay)
+    this.retries.set(dir, { timer, attempt })
   }
 
   /** Records the hash of content that is (about to be) on disk, so it is not reported. */
@@ -84,6 +137,8 @@ export class NoteWatcher {
   close(): void {
     for (const w of this.dirs.values()) w.close()
     this.dirs.clear()
+    for (const r of this.retries.values()) this.deps.clearTimeout(r.timer)
+    this.retries.clear()
     for (const t of this.timers.values()) clearTimeout(t)
     this.timers.clear()
   }
