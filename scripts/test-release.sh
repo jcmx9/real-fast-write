@@ -4,9 +4,13 @@
 #   scripts/test-release.sh
 #
 # 1. Version arithmetic via `--print-next`.
-# 2. `--dry-run` for dev and prod against the real checkout (must change nothing).
-# 3. Full dev and prod flows in a throwaway repo below a temp dir, with a bare repo
-#    as fake origin and fake `npm`/`gh` on PATH. The real remote is never touched.
+# 2. `--dry-run` for dev and prod against the real checkout (must change nothing, no network).
+# 3. Full flows in a throwaway repo below a temp dir, with a bare repo as fake origin and
+#    fake `npm`/`gh` on PATH. The fake `gh pr merge --rebase` behaves like GitHub: it
+#    cherry-picks the PR's commits onto the base with a new committer, so SHAs change, and
+#    it refuses merge commits or conflicts. Two prod cycles run back to back with a dev
+#    cycle in between, plus resume, conflict and atomic-push cases. The real remote is
+#    never touched.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -53,19 +57,27 @@ pass "invalid version fails"
 # --- 2. dry run on the real checkout ---------------------------------------
 before="$(git -C "${root}" rev-parse HEAD)$(git -C "${root}" status --porcelain)"
 cur="$(sed -n 's/^  "version": "\(.*\)",/\1/p' "${root}/package.json" | head -n 1)"
-out="$("${release}" dev --dry-run)"
+out="$("${release}" dev --dry-run 2>/dev/null)"
 want="$(RFW_CURRENT_VERSION="${cur}" "${release}" --print-next dev)"
 grep -qx "Version: ${want}" <<<"${out}" || fail "dev --dry-run did not print 'Version: ${want}'"
-grep -q "git -C ${root} push" <<<"${out}" || fail "dev --dry-run did not list the push"
-pass "dev --dry-run prints ${want}"
-out="$("${release}" prod --dry-run)"
+grep -q "git -C ${root} push -q --atomic" <<<"${out}" || fail "dev --dry-run did not list the atomic push"
+pass "dev --dry-run prints ${want} and an atomic push"
+out="$("${release}" prod --dry-run 2>/dev/null)"
 want="$(RFW_CURRENT_VERSION="${cur}" "${release}" --print-next prod)"
 grep -qx "Version: ${want}" <<<"${out}" || fail "prod --dry-run did not print 'Version: ${want}'"
 grep -q "gh pr merge" <<<"${out}" || fail "prod --dry-run did not list the merge"
-pass "prod --dry-run prints ${want}"
-out="$("${release}" prod --new-month --dry-run)"
+grep -q "CHANGELOG.md: \[Unreleased\] -> ## \[${want}\]" <<<"${out}" || fail "prod --dry-run did not list the CHANGELOG roll"
+pass "prod --dry-run prints ${want}, the merge and the CHANGELOG roll"
+out="$("${release}" prod --new-month --dry-run 2>/dev/null)"
 grep -q '^Version: ' <<<"${out}" || fail "prod --new-month --dry-run printed no version"
 pass "prod --new-month --dry-run"
+err="$(RFW_CURRENT_VERSION=26.10.0-dev.3 RFW_NOW=26.11 "${release}" prod --dry-run 2>&1 >/dev/null)"
+grep -q "Warnung: Release 26.10.0 trägt den Monat 26.10, heute ist 26.11" <<<"${err}" || fail "no warning for an old month: ${err}"
+grep -q -- "--new-month" <<<"${err}" || fail "old-month warning does not mention --new-month"
+pass "prod warns when the release carries an old month"
+err="$(RFW_CURRENT_VERSION=26.11.0-dev.3 RFW_NOW=26.11 "${release}" prod --dry-run 2>&1 >/dev/null)"
+if grep -q "trägt den Monat" <<<"${err}"; then fail "warned about the current month"; fi
+pass "prod does not warn in the current month"
 after="$(git -C "${root}" rev-parse HEAD)$(git -C "${root}" status --porcelain)"
 expect_eq "dry runs leave the checkout untouched" "${after}" "${before}"
 
@@ -74,135 +86,392 @@ fakebin="${tmp}/bin"
 mkdir -p "${fakebin}"
 cat >"${fakebin}/npm" <<'NPM'
 #!/usr/bin/env bash
-# Fake `npm version <v> --no-git-tag-version`: rewrites the version in package*.json.
+# Fake `npm version <v> --no-git-tag-version`: rewrites the version in package*.json
+# (package-lock.json has two version lines, like the real one).
 set -euo pipefail
 [[ "$1" == "version" ]] || exit 1
 for f in package.json package-lock.json; do
-  [[ -f "${f}" ]] && sed -i.bak "s/^\(  \"version\": \"\).*\(\",\)/\1$2\2/" "${f}" && rm -f "${f}.bak"
+  [[ -f "${f}" ]] || continue
+  sed -i.bak "s/^\([[:space:]]*\"version\": \"\)[^\"]*\(\",\{0,1\}\)$/\1$2\2/" "${f}"
+  rm -f "${f}.bak"
 done
 exit 0
 NPM
 cat >"${fakebin}/gh" <<'GH'
 #!/usr/bin/env bash
-# Fake gh. `pr create` records the base; `pr merge` merges inside the bare fake origin.
+# Fake gh backed by the bare fake origin. State lives in FAKE_STATE:
+#   <head>.base / <head>.state   PR base branch and state (OPEN, MERGED)
+#   <head>.polls                 number of `pr checks --json` queries
+#   fail-<head>                  `pr checks --watch` fails while this file exists
+# FAKE_CHECKS_DELAY=N: the first N queries report no checks (GitHub registers them late);
+# `--watch` before registration fails like the real gh ("no checks reported").
+# FAKE_MERGE_NOOP: `pr merge --rebase` leaves the base unchanged.
+# FAKE_HOTFIX_FILE=<file>: after a rebase-merge, a hotfix commit on the base rewrites it.
+# FAKE_DEV_FILE=<file>: after a rebase-merge, someone else pushes a change of it to dev.
 set -euo pipefail
 bare="${FAKE_ORIGIN}"
-case "$1 $2" in
-  "auth status") exit 0 ;;
+state="${FAKE_STATE}"
+echo "gh $*" >>"${state}/gh.log"
+sub="$1 $2"
+shift 2
+pos=() repo="" head="" base="" json="" watch=0 method=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -R | --repo) repo="$2"; shift ;;
+    --head) head="$2"; shift ;;
+    --base) base="$2"; shift ;;
+    --title | --body | --jq) shift ;;
+    --json) json="$2"; shift ;;
+    --watch) watch=1 ;;
+    --rebase) method=rebase ;;
+    --merge) method=merge ;;
+    --fail-fast | --delete-branch) ;;
+    -*) echo "fake gh: unknown flag $1" >&2; exit 1 ;;
+    *) pos+=("$1") ;;
+  esac
+  shift
+done
+[[ "${sub}" == "auth status" ]] && exit 0
+[[ "${repo}" == "${FAKE_REPO}" ]] || { echo "fake gh: expected -R ${FAKE_REPO}, got '${repo}'" >&2; exit 1; }
+key() { echo "$1" | tr / _; }
+
+github_rebase() {
+  local base="$1" head="$2" wt c
+  local mb
+  mb="$(git -C "${bare}" merge-base "refs/heads/${base}" "refs/heads/${head}")"
+  if [[ -n "$(git -C "${bare}" rev-list --merges "${mb}..refs/heads/${head}")" ]]; then
+    echo "fake gh: merge commits in the PR, rebase would be unsafe" >&2
+    exit 1
+  fi
+  [[ -z "${FAKE_MERGE_NOOP:-}" ]] || return 0
+  wt="$(mktemp -d)"
+  git clone -q "${bare}" "${wt}/w"
+  git -C "${wt}/w" checkout -q "${base}"
+  for c in $(git -C "${bare}" rev-list --reverse "${mb}..refs/heads/${head}"); do
+    if ! GIT_COMMITTER_NAME=GitHub GIT_COMMITTER_EMAIL=noreply@github.com \
+      git -C "${wt}/w" cherry-pick "${c}" >/dev/null 2>&1; then
+      echo "fake gh: this branch cannot be rebased due to conflicts" >&2
+      rm -rf "${wt}"
+      exit 1
+    fi
+  done
+  if [[ -n "${FAKE_HOTFIX_FILE:-}" ]]; then
+    echo hotfix >"${wt}/w/${FAKE_HOTFIX_FILE}"
+    git -C "${wt}/w" commit -q -am "fix: hotfix on ${base}"
+  fi
+  git -C "${wt}/w" push -q origin "HEAD:refs/heads/${base}"
+  if [[ -n "${FAKE_DEV_FILE:-}" ]]; then
+    git -C "${wt}/w" checkout -q dev
+    echo "dev later" >"${wt}/w/${FAKE_DEV_FILE}"
+    git -C "${wt}/w" commit -q -am "fix: concurrent change on dev"
+    git -C "${wt}/w" push -q origin dev
+  fi
+  rm -rf "${wt}"
+}
+
+case "${sub}" in
   "pr create")
-    head="" base=""
-    while [[ $# -gt 0 ]]; do
-      case "$1" in --head) head="$2"; shift ;; --base) base="$2"; shift ;; esac
-      shift
-    done
-    echo "${base}" >"${FAKE_STATE}/$(echo "${head}" | tr / _).base"
-    echo "https://example.invalid/pr/1"
+    k="$(key "${head}")"
+    if [[ "$(cat "${state}/${k}.state" 2>/dev/null)" == OPEN ]]; then
+      echo "fake gh: a pull request for ${head} already exists" >&2
+      exit 1
+    fi
+    echo "${base}" >"${state}/${k}.base"
+    echo OPEN >"${state}/${k}.state"
+    echo 0 >"${state}/${k}.polls"
+    echo "https://example.invalid/pr/${k}"
     ;;
-  "pr checks") exit 0 ;;
-  "pr merge")
-    head="$3"
-    base="$(cat "${FAKE_STATE}/$(echo "${head}" | tr / _).base")"
-    if [[ "$*" == *--rebase* ]]; then
-      git -C "${bare}" merge-base --is-ancestor "refs/heads/${base}" "refs/heads/${head}"
-      [[ -n "${FAKE_MERGE_NOOP:-}" ]] || git -C "${bare}" update-ref "refs/heads/${base}" "refs/heads/${head}"
+  "pr view")
+    f="${state}/$(key "${pos[0]}").state"
+    [[ -f "${f}" ]] || { echo "no pull requests found for branch \"${pos[0]}\"" >&2; exit 1; }
+    cat "${f}"
+    ;;
+  "pr checks")
+    k="$(key "${pos[0]}")"
+    polls="$(cat "${state}/${k}.polls")"
+    if ((polls < ${FAKE_CHECKS_DELAY:-0})); then
+      [[ "${watch}" -eq 1 ]] || echo $((polls + 1)) >"${state}/${k}.polls"
+      echo "no checks reported on the '${pos[0]}' branch" >&2
+      exit 1
+    fi
+    if [[ "${watch}" -eq 1 ]]; then
+      [[ ! -f "${state}/fail-${k}" ]] || { echo "X ci"; exit 1; }
+      echo "ok ci"
     else
-      tree="$(git -C "${bare}" merge-tree --write-tree "refs/heads/${base}" "refs/heads/${head}")"
-      c="$(git -C "${bare}" commit-tree "${tree}" -p "refs/heads/${base}" -p "refs/heads/${head}" -m "Merge ${head}")"
-      git -C "${bare}" update-ref "refs/heads/${base}" "${c}"
+      [[ "${json}" == name ]] || exit 1
+      echo 1
     fi
     ;;
-  *) echo "fake gh: unsupported: $*" >&2; exit 1 ;;
+  "pr merge")
+    h="${pos[0]}"
+    k="$(key "${h}")"
+    [[ "$(cat "${state}/${k}.state")" == OPEN ]] || { echo "fake gh: PR not open" >&2; exit 1; }
+    b="$(cat "${state}/${k}.base")"
+    if [[ "${method}" == rebase ]]; then
+      github_rebase "${b}" "${h}"
+    else
+      tree="$(git -C "${bare}" merge-tree --write-tree "refs/heads/${b}" "refs/heads/${h}")" ||
+        { echo "fake gh: pull request is not mergeable" >&2; exit 1; }
+      c="$(git -C "${bare}" commit-tree "${tree}" -p "refs/heads/${b}" -p "refs/heads/${h}" -m "Merge ${h}")"
+      git -C "${bare}" update-ref "refs/heads/${b}" "${c}"
+    fi
+    echo MERGED >"${state}/${k}.state"
+    git -C "${bare}" update-ref -d "refs/heads/${h}"
+    ;;
+  *) echo "fake gh: unsupported: ${sub} $*" >&2; exit 1 ;;
 esac
 GH
 chmod +x "${fakebin}/npm" "${fakebin}/gh"
 
-git_id=(-c user.name=jcmx9 -c user.email=jcmx9@users.noreply.github.com)
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 export GIT_AUTHOR_NAME=jcmx9 GIT_AUTHOR_EMAIL=jcmx9@users.noreply.github.com
 export GIT_COMMITTER_NAME=jcmx9 GIT_COMMITTER_EMAIL=jcmx9@users.noreply.github.com
-export FAKE_ORIGIN="${tmp}/origin.git" FAKE_STATE="${tmp}/state"
-mkdir -p "${FAKE_STATE}"
+export FAKE_ORIGIN="${tmp}/origin.git" FAKE_STATE="${tmp}/state" FAKE_REPO="jcmx9/fake"
+export RFW_GH_REPO="${FAKE_REPO}" RFW_POLL_INTERVAL=0 RFW_TODAY=2026-10-15 RFW_NOW=26.10
+work="${tmp}/work"
 
 setup_repo() {
-  rm -rf "${FAKE_ORIGIN}" "${tmp}/work"
+  rm -rf "${FAKE_ORIGIN}" "${work}" "${FAKE_STATE}"
+  mkdir -p "${FAKE_STATE}"
   git init -q --bare -b main "${FAKE_ORIGIN}"
-  git init -q -b main "${tmp}/work"
-  mkdir -p "${tmp}/work/scripts"
-  cp "${release}" "${tmp}/work/scripts/release.sh"
-  printf '{\n  "name": "x",\n  "version": "26.10.0-dev.0",\n  "private": true\n}\n' >"${tmp}/work/package.json"
-  cp "${tmp}/work/package.json" "${tmp}/work/package-lock.json"
-  (
-    cd "${tmp}/work"
-    git "${git_id[@]}" add -A
-    git "${git_id[@]}" commit -q -m init
-    git remote add origin "${FAKE_ORIGIN}"
-    git push -q origin main
-    git checkout -q -b dev
-    git push -q origin dev
-  )
+  git init -q -b main "${work}"
+  mkdir -p "${work}/scripts"
+  cp "${release}" "${work}/scripts/release.sh"
+  printf '{\n  "name": "x",\n  "version": "26.10.0-dev.0",\n  "private": true\n}\n' >"${work}/package.json"
+  printf '{\n  "name": "x",\n  "version": "26.10.0-dev.0",\n  "lockfileVersion": 3,\n  "packages": {\n    "": {\n      "name": "x",\n      "version": "26.10.0-dev.0"\n    }\n  }\n}\n' >"${work}/package-lock.json"
+  printf '# Changelog\n\n## [Unreleased]\n\n### Added\n- first\n' >"${work}/CHANGELOG.md"
+  echo base >"${work}/a.txt"
+  git -C "${work}" add -A
+  git -C "${work}" commit -q -m init
+  git -C "${work}" remote add origin "${FAKE_ORIGIN}"
+  git -C "${work}" push -q origin main
+  git -C "${work}" checkout -q -b dev
+  git -C "${work}" push -q origin dev
+}
+
+# A feature commit on dev, pushed (what a squash-merged feature PR leaves on dev).
+dev_commit() {
+  local file="$1" content="$2"
+  echo "${content}" >"${work}/${file}"
+  git -C "${work}" add -A
+  git -C "${work}" commit -q -m "feat: ${file}"
+  git -C "${work}" push -q origin dev
 }
 
 pkg_version() {
   git -C "$1" show "$2:package.json" | sed -n 's/^  "version": "\(.*\)",/\1/p'
 }
 
-run_release() {
-  (cd "${tmp}/work" && PATH="${fakebin}:${PATH}" ./scripts/release.sh "$@")
+lock_versions() {
+  git -C "$1" show "$2:package-lock.json" | sed -n 's/^ *"version": "\(.*\)",*$/\1/p' | sort -u | tr '\n' ' '
 }
 
+# Started from outside the repo: release.sh must not depend on the caller's directory.
+run_release() {
+  (cd "${tmp}" && PATH="${fakebin}:${PATH}" "${work}/scripts/release.sh" "$@")
+}
+
+run_code() {
+  set +e
+  run_release "$@" >"${tmp}/out.txt" 2>&1
+  code=$?
+  set -e
+}
+
+expect_local_clean_dev() {
+  expect_eq "$1: local branch is dev" "$(git -C "${work}" rev-parse --abbrev-ref HEAD)" "dev"
+  expect_eq "$1: working tree clean" "$(git -C "${work}" status --porcelain)" ""
+}
+
+# Main must never contain merge commits (rebase-merges only).
+expect_linear_main() {
+  expect_eq "$1: main is linear" "$(git -C "${FAKE_ORIGIN}" rev-list --merges main | wc -l | tr -d ' ')" "0"
+}
+
+expect_released() {
+  local label="$1" version="$2" next_dev="$3"
+  expect_eq "${label}: main has ${version}" "$(pkg_version "${FAKE_ORIGIN}" main)" "${version}"
+  expect_eq "${label}: main lock file has ${version}" "$(lock_versions "${FAKE_ORIGIN}" main)" "${version} "
+  expect_eq "${label}: tag v${version} points at main" \
+    "$(git -C "${FAKE_ORIGIN}" rev-parse "v${version}^{commit}")" "$(git -C "${FAKE_ORIGIN}" rev-parse main)"
+  expect_eq "${label}: dev continues at ${next_dev}" "$(pkg_version "${FAKE_ORIGIN}" dev)" "${next_dev}"
+  expect_eq "${label}: dev lock file at ${next_dev}" "$(lock_versions "${FAKE_ORIGIN}" dev)" "${next_dev} "
+  git -C "${FAKE_ORIGIN}" merge-base --is-ancestor main dev || fail "${label}: main not merged back into dev"
+  pass "${label}: main merged back into dev"
+  expect_eq "${label}: main was rewritten by the rebase-merge" \
+    "$(git -C "${FAKE_ORIGIN}" log -1 --format=%cn main)" "GitHub"
+  expect_eq "${label}: release branch deleted" \
+    "$(git -C "${FAKE_ORIGIN}" for-each-ref --format=x "refs/heads/release/${version}")" ""
+  expect_eq "${label}: back-merge branch deleted" \
+    "$(git -C "${FAKE_ORIGIN}" for-each-ref --format=x "refs/heads/chore/back-merge-${version}")" ""
+  expect_linear_main "${label}"
+  # Apart from the version lines, main and dev hold the same files.
+  local diff
+  diff="$(git -C "${FAKE_ORIGIN}" diff -U0 main dev | grep -E '^[+-]' | grep -vE '^(\+\+\+|---) ' | grep -v '"version"' || true)"
+  expect_eq "${label}: main and dev differ only in the version" "${diff}" ""
+  expect_local_clean_dev "${label}"
+  expect_eq "${label}: local dev equals origin/dev" "$(git -C "${work}" rev-parse dev)" "$(git -C "${FAKE_ORIGIN}" rev-parse dev)"
+}
+
+# 3a. dev, prod, dev, prod, prod --new-month ---------------------------------
 setup_repo
 run_release dev >/dev/null
 expect_eq "dev: package.json bumped on origin/dev" "$(pkg_version "${FAKE_ORIGIN}" dev)" "26.10.0-dev.1"
+expect_eq "dev: lock file bumped (both lines)" "$(lock_versions "${FAKE_ORIGIN}" dev)" "26.10.0-dev.1 "
 git -C "${FAKE_ORIGIN}" rev-parse -q --verify refs/tags/v26.10.0-dev.1 >/dev/null || fail "dev: tag not pushed"
 pass "dev: tag v26.10.0-dev.1 pushed"
-expect_eq "dev: lock file bumped" "$(git -C "${FAKE_ORIGIN}" show dev:package-lock.json | sed -n 's/^  "version": "\(.*\)",/\1/p')" "26.10.0-dev.1"
 expect_eq "dev: commit message" "$(git -C "${FAKE_ORIGIN}" log -1 --format=%s dev)" "release: 26.10.0-dev.1"
-
-set +e
-run_release dev >/dev/null 2>&1 <<<""
-set -e
+run_release dev >/dev/null 2>&1
 expect_eq "dev: second run bumps again" "$(pkg_version "${FAKE_ORIGIN}" dev)" "26.10.0-dev.2"
 
 # precondition failures
-echo dirty >"${tmp}/work/dirty.txt"
-set +e
-run_release dev >/dev/null 2>&1
-code=$?
-set -e
+echo dirty >"${work}/dirty.txt"
+run_code dev
 expect_eq "dirty tree exit code" "${code}" "4"
-rm "${tmp}/work/dirty.txt"
-git -C "${tmp}/work" checkout -q -b other
-set +e
-run_release dev >/dev/null 2>&1
-code=$?
-set -e
+rm "${work}/dirty.txt"
+git -C "${work}" checkout -q -b other
+run_code dev
 expect_eq "wrong branch exit code" "${code}" "3"
-git -C "${tmp}/work" checkout -q dev
+run_code prod --dry-run
+expect_eq "dry run on the wrong branch still succeeds" "${code}" "0"
+grep -q "Warnung: Release nur auf dem Branch 'dev'" "${tmp}/out.txt" || fail "dry run did not warn about the branch"
+pass "dry run reports the wrong branch as a warning"
+git -C "${work}" checkout -q dev
+git -C "${work}" branch -q -D other
+git -C "${work}" remote add gh git@github.com:jcmx9/real-fast-write.git
+out="$(cd "${tmp}" && env -u RFW_GH_REPO RFW_REMOTE=gh PATH="${fakebin}:${PATH}" "${work}/scripts/release.sh" prod --dry-run 2>/dev/null)"
+grep -q "gh pr merge release/26.10.0 -R jcmx9/real-fast-write --rebase" <<<"${out}" || fail "gh -R not derived from the remote URL"
+pass "gh -R owner/repo derived from the remote URL"
+git -C "${work}" remote remove gh
 
-# prod
-run_release prod >/dev/null
-expect_eq "prod: main has the release version" "$(pkg_version "${FAKE_ORIGIN}" main)" "26.10.0"
-git -C "${FAKE_ORIGIN}" rev-parse -q --verify refs/tags/v26.10.0 >/dev/null || fail "prod: tag not pushed"
-expect_eq "prod: tag points at main" "$(git -C "${FAKE_ORIGIN}" rev-parse 'v26.10.0^{commit}')" "$(git -C "${FAKE_ORIGIN}" rev-parse main)"
-expect_eq "prod: dev continues at next MICRO" "$(pkg_version "${FAKE_ORIGIN}" dev)" "26.10.1-dev.0"
-git -C "${FAKE_ORIGIN}" merge-base --is-ancestor main dev || fail "prod: main not merged back into dev"
-pass "prod: main merged back into dev"
+dev_commit b.txt "feature b"
+FAKE_CHECKS_DELAY=2 run_release prod >"${tmp}/out.txt" 2>&1 || { cat "${tmp}/out.txt"; fail "prod (cycle 1) failed"; }
+expect_released "prod cycle 1" "26.10.0" "26.10.1-dev.0"
+expect_eq "prod cycle 1: checks were polled until registered" \
+  "$(grep -c 'gh pr checks release/26.10.0 -R jcmx9/fake --json name' "${FAKE_STATE}/gh.log")" "3"
+if grep -v -- '-R jcmx9/fake' "${FAKE_STATE}/gh.log" | grep -qv 'auth status'; then fail "a gh call ran without -R"; fi
+pass "every gh call uses -R"
+git -C "${FAKE_ORIGIN}" show main:CHANGELOG.md | grep -qx '## \[26.10.0\] - 2026-10-15' || fail "CHANGELOG not rolled on main"
+git -C "${FAKE_ORIGIN}" show main:CHANGELOG.md | grep -qx '## \[Unreleased\]' || fail "CHANGELOG lost [Unreleased]"
+pass "prod cycle 1: CHANGELOG rolled ([Unreleased] kept, [26.10.0] added)"
+git -C "${FAKE_ORIGIN}" log -1 --format=%B main | grep -q '^Release-Source: ' || fail "release commit has no Release-Source"
+pass "prod cycle 1: release commit records its dev source"
 
-# the release above is v26.10.0, so the same month would collide; pretend it is November
-RFW_NOW=26.11 run_release prod --new-month >/dev/null 2>&1 || fail "prod --new-month failed"
-want="26.11.0"
-expect_eq "prod --new-month: version on main" "$(pkg_version "${FAKE_ORIGIN}" main)" "${want}"
+# dev cycle in between, plus a feature and a CHANGELOG entry
+run_release dev >/dev/null
+expect_eq "dev between releases" "$(pkg_version "${FAKE_ORIGIN}" dev)" "26.10.1-dev.1"
+dev_commit c.txt "feature c"
+awk '{ print } $0 == "## [Unreleased]" { print ""; print "### Fixed"; print "- second" }' "${work}/CHANGELOG.md" >"${tmp}/cl"
+cp "${tmp}/cl" "${work}/CHANGELOG.md"
+git -C "${work}" commit -q -am "docs: changelog"
+git -C "${work}" push -q origin dev
 
-# a wrong version on main must abort before tagging
+run_release prod >"${tmp}/out.txt" 2>&1 || { cat "${tmp}/out.txt"; fail "prod (cycle 2) failed"; }
+expect_released "prod cycle 2" "26.10.1" "26.10.2-dev.0"
+git -C "${FAKE_ORIGIN}" show main:c.txt >/dev/null 2>&1 || fail "prod cycle 2: feature c missing on main"
+pass "prod cycle 2: new feature reached main"
+expect_eq "prod cycle 2: earlier dev commits are not replayed onto main" \
+  "$(git -C "${FAKE_ORIGIN}" log --format=%s main | grep -c '^release: 26.10.0-dev.1$')" "1"
+expect_eq "prod cycle 2: feature b once on main" \
+  "$(git -C "${FAKE_ORIGIN}" log --format=%s main | grep -c '^feat: b.txt$')" "1"
+git -C "${FAKE_ORIGIN}" show main:CHANGELOG.md | grep -qx '## \[26.10.1\] - 2026-10-15' || fail "cycle 2 CHANGELOG not rolled"
+pass "prod cycle 2: CHANGELOG rolled"
+
+# the version on dev is 26.10.2-dev.0; a release in November uses --new-month
+dev_commit d.txt "feature d"
+RFW_NOW=26.11 run_release prod --new-month >"${tmp}/out.txt" 2>&1 || { cat "${tmp}/out.txt"; fail "prod --new-month (cycle 3) failed"; }
+expect_released "prod cycle 3 (--new-month)" "26.11.0" "26.11.1-dev.0"
+
+# 3b. resume after failed release checks ------------------------------------
 setup_repo
-set +e
-FAKE_MERGE_NOOP=1 run_release prod >/dev/null 2>&1
-code=$?
-set -e
+dev_commit b.txt "feature b"
+touch "${FAKE_STATE}/fail-release_26.10.0"
+run_code prod
+expect_eq "resume: failed release checks exit code" "${code}" "9"
+expect_local_clean_dev "resume: after failed checks"
+git -C "${FAKE_ORIGIN}" rev-parse -q --verify refs/heads/release/26.10.0 >/dev/null || fail "release branch was not pushed"
+if git -C "${FAKE_ORIGIN}" rev-parse -q --verify refs/tags/v26.10.0 >/dev/null; then fail "tag pushed despite failed checks"; fi
+pass "resume: no tag after failed checks"
+rm "${FAKE_STATE}/fail-release_26.10.0"
+run_release prod >"${tmp}/out.txt" 2>&1 || { cat "${tmp}/out.txt"; fail "resumed prod failed"; }
+grep -q "origin/release/26.10.0 existiert bereits und wird weiterverwendet" "${tmp}/out.txt" || fail "resume did not report the existing branch"
+grep -q "PR release/26.10.0 -> main existiert bereits" "${tmp}/out.txt" || fail "resume did not report the open PR"
+pass "resume: existing branch and PR are reused"
+expect_released "resume (release checks)" "26.10.0" "26.10.1-dev.0"
+
+# 3c. resume after failed back-merge checks ---------------------------------
+setup_repo
+touch "${FAKE_STATE}/fail-chore_back-merge-26.10.0"
+run_code prod
+expect_eq "resume: failed back-merge checks exit code" "${code}" "9"
+git -C "${FAKE_ORIGIN}" rev-parse -q --verify refs/tags/v26.10.0 >/dev/null || fail "tag missing before back-merge"
+rm "${FAKE_STATE}/fail-chore_back-merge-26.10.0"
+run_release prod >"${tmp}/out.txt" 2>&1 || { cat "${tmp}/out.txt"; fail "resumed back-merge failed"; }
+grep -q "v26.10.0 ist bereits veröffentlicht" "${tmp}/out.txt" || fail "resume did not detect the published tag"
+grep -q "origin/chore/back-merge-26.10.0 existiert bereits" "${tmp}/out.txt" || fail "resume did not reuse the back-merge branch"
+pass "resume: published tag and back-merge branch detected"
+expect_released "resume (back-merge checks)" "26.10.0" "26.10.1-dev.0"
+run_release prod >"${tmp}/out.txt" 2>&1 || { cat "${tmp}/out.txt"; fail "prod right after a finished release failed"; }
+expect_released "next release after resume" "26.10.1" "26.10.2-dev.0"
+
+# 3d. a hotfix on main flows back into dev -----------------------------------
+setup_repo
+dev_commit a.txt "dev"
+FAKE_HOTFIX_FILE=a.txt run_release prod >"${tmp}/out.txt" 2>&1 || { cat "${tmp}/out.txt"; fail "prod with a hotfix on main failed"; }
+expect_eq "hotfix on main: dev gets it" "$(git -C "${FAKE_ORIGIN}" show dev:a.txt)" "hotfix"
+expect_eq "hotfix on main: dev continues" "$(pkg_version "${FAKE_ORIGIN}" dev)" "26.10.1-dev.0"
+expect_local_clean_dev "hotfix on main"
+
+# 3e. back-merge with a real conflict aborts cleanly -------------------------
+setup_repo
+dev_commit a.txt "dev"
+FAKE_HOTFIX_FILE=a.txt FAKE_DEV_FILE=a.txt run_code prod
+expect_eq "back-merge conflict exit code" "${code}" "10"
+grep -q "Konflikte außerhalb der Versionszeilen (a.txt)" "${tmp}/out.txt" || fail "conflict message does not name a.txt: $(cat "${tmp}/out.txt")"
+pass "back-merge conflict names the file"
+git -C "${FAKE_ORIGIN}" rev-parse -q --verify refs/tags/v26.10.0 >/dev/null || fail "release tag missing"
+expect_eq "back-merge conflict: nothing pushed to origin/dev" \
+  "$(git -C "${FAKE_ORIGIN}" log -1 --format=%s dev)" "fix: concurrent change on dev"
+expect_eq "back-merge conflict: no remote back-merge branch" \
+  "$(git -C "${FAKE_ORIGIN}" for-each-ref --format=x refs/heads/chore/)" ""
+expect_eq "back-merge conflict: no local back-merge branch" \
+  "$(git -C "${work}" for-each-ref --format=x refs/heads/chore/)" ""
+[[ ! -f "${work}/.git/MERGE_HEAD" ]] || fail "merge left in progress"
+expect_local_clean_dev "back-merge conflict"
+
+# 3f. a wrong version on main aborts before tagging --------------------------
+setup_repo
+FAKE_MERGE_NOOP=1 run_code prod
 expect_eq "prod: wrong version on main aborts (exit code)" "${code}" "8"
 if git -C "${FAKE_ORIGIN}" rev-parse -q --verify refs/tags/v26.10.0 >/dev/null; then
   fail "prod: tag must not exist after failed verification"
 fi
 pass "prod: no tag after failed verification"
+
+# 3g. dev push is atomic and resumable ---------------------------------------
+setup_repo
+cat >"${FAKE_ORIGIN}/hooks/update" <<'HOOK'
+#!/usr/bin/env bash
+# Reject updates of dev while the marker exists (protected branch / lost race).
+if [[ "$1" == refs/heads/dev && -f "${FAKE_STATE}/reject-dev" ]]; then
+  echo "dev is protected" >&2
+  exit 1
+fi
+exit 0
+HOOK
+chmod +x "${FAKE_ORIGIN}/hooks/update"
+touch "${FAKE_STATE}/reject-dev"
+run_code dev
+expect_eq "dev: rejected push exit code" "${code}" "9"
+if git -C "${FAKE_ORIGIN}" rev-parse -q --verify refs/tags/v26.10.0-dev.1 >/dev/null; then
+  fail "dev: tag landed although dev was rejected (push not atomic)"
+fi
+pass "dev: rejected branch push publishes no tag (atomic)"
+rm "${FAKE_STATE}/reject-dev"
+run_release dev >"${tmp}/out.txt" 2>&1 || { cat "${tmp}/out.txt"; fail "dev resume failed"; }
+grep -q "v26.10.0-dev.1 ist lokal fertig" "${tmp}/out.txt" || fail "dev resume not detected"
+expect_eq "dev resume: version not bumped twice" "$(pkg_version "${FAKE_ORIGIN}" dev)" "26.10.0-dev.1"
+git -C "${FAKE_ORIGIN}" rev-parse -q --verify refs/tags/v26.10.0-dev.1 >/dev/null || fail "dev resume: tag missing"
+pass "dev resume: commit and tag pushed"
 
 echo "All release tests passed."
