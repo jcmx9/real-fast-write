@@ -407,6 +407,9 @@
   font-size: 0.9em;
   color: var(--rfd-chrome);
 }
+.rf-preview .rf-titleblock-none {
+  margin: 0;
+}
 .rf-preview .rf-titleblock-empty {
   margin: 0;
   text-align: left;

@@ -70,7 +70,7 @@ export function renderTitleBlock(
 ): HTMLElement {
   const el = doc.createElement('div')
   el.className = 'rf-titleblock'
-  el.title = 'YAML-Header ausgeblendet'
+  if (empty !== 'none' || tb) el.title = 'YAML-Header ausgeblendet'
   if (!tb) {
     if (empty === 'none') {
       el.classList.add('rf-titleblock-none')

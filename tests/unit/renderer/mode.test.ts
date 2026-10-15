@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { EditorState } from '@codemirror/state'
+import { EditorView } from '@codemirror/view'
 import { describe, expect, it } from 'vitest'
 import { modeCompartment, modeExtensions, presentMode } from '../../../src/renderer/editor/mode'
 
@@ -12,5 +13,17 @@ describe('mode compartment', () => {
   })
   it('defaults to false without the compartment', () => {
     expect(EditorState.create({}).facet(presentMode)).toBe(false)
+  })
+})
+
+describe('rf-present class', () => {
+  it('is on the editor in Present and gone in Edit', () => {
+    const view = new EditorView({
+      state: EditorState.create({ extensions: modeCompartment.of(modeExtensions('present')) }),
+    })
+    expect(view.dom.classList.contains('rf-present')).toBe(true)
+    view.dispatch({ effects: modeCompartment.reconfigure(modeExtensions('edit')) })
+    expect(view.dom.classList.contains('rf-present')).toBe(false)
+    view.destroy()
   })
 })

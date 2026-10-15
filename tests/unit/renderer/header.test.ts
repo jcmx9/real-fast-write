@@ -232,3 +232,72 @@ describe('moveOutOfHeader', () => {
     expect(moveOutOfHeader(outside)).toEqual({})
   })
 })
+
+describe('hardening', () => {
+  const HEAD = '---\ntitle: "Kickoff"\n---'
+  function pv(text: string, mode: 'edit' | 'present' = 'present') {
+    const parent = document.createElement('div')
+    document.body.append(parent)
+    return new EditorView({ state: createState(text, '\n', 'preview', false, mode), parent })
+  }
+
+  it('a header-only note stays editable in Present', async () => {
+    const v = pv('---\na: 1\n---')
+    expect(collapsed(v.state)).toEqual([])
+    v.dispatch({ changes: { from: v.state.doc.length, insert: '\nText' }, userEvent: 'input' })
+    expect(v.state.doc.toString()).toBe('---\na: 1\n---\nText')
+    expect(collapsed(v.state)).toEqual(['header-fold@0-12'])
+    await Promise.resolve()
+    expect(v.state.selection.main.head).toBeGreaterThanOrEqual(13)
+    v.destroy()
+  })
+
+  it('undo that lands in the collapsed header moves the cursor out', async () => {
+    const v = pv(`${HEAD}\nBody`, 'edit')
+    v.dispatch({ effects: viewCompartment.reconfigure(viewExtensions('code')) })
+    v.dispatch({ changes: { from: 4, insert: 'x' }, selection: { anchor: 5 }, userEvent: 'input' })
+    v.dispatch({
+      effects: [
+        viewCompartment.reconfigure(viewExtensions('preview')),
+        modeCompartment.reconfigure(modeExtensions('present')),
+      ],
+    })
+    v.dispatch(moveOutOfHeader(v.state))
+    undo(v)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(v.state.doc.toString()).toBe(`${HEAD}\nBody`)
+    expect(v.state.selection.main.head).toBeGreaterThanOrEqual(HEAD.length + 1)
+    v.destroy()
+  })
+
+  it('leaving Present with the toggle on and no title fields shows the marker', () => {
+    const doc = '---\ntoc: false\n---\n\n# Body'
+    const text = (s: EditorState) => {
+      let out = ''
+      s.field(headerFold).between(0, doc.length, (_f, _t, d) => {
+        out = (d.spec.widget as { toDOM(): HTMLElement }).toDOM().textContent ?? ''
+      })
+      return out
+    }
+    const s = makePresent(doc, doc.length, true)
+    expect(text(s)).toBe('')
+    const edit = s.update({ effects: modeCompartment.reconfigure(modeExtensions('edit')) }).state
+    expect(text(edit)).toBe('⋯ YAML-Header')
+  })
+
+  it('Present keystrokes leave the header bytes unchanged', () => {
+    const body = `${HEAD}\nBody`
+    const v = pv(body)
+    v.dispatch({ selection: { anchor: HEAD.length + 1 } })
+    deleteCharBackward(v)
+    expect(v.state.doc.toString()).toBe(body)
+    cursorDocStart(v)
+    v.dispatch(v.state.replaceSelection('z'))
+    expect(v.state.doc.sliceString(0, HEAD.length)).toBe(HEAD)
+    selectAll(v)
+    deleteCharBackward(v)
+    expect(v.state.doc.sliceString(0, HEAD.length)).toBe(HEAD)
+    v.destroy()
+  })
+})

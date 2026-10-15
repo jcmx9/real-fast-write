@@ -7,7 +7,13 @@ import {
   type Transaction,
   type TransactionSpec,
 } from '@codemirror/state'
-import { Decoration, type DecorationSet, EditorView, WidgetType } from '@codemirror/view'
+import {
+  Decoration,
+  type DecorationSet,
+  EditorView,
+  ViewPlugin,
+  WidgetType,
+} from '@codemirror/view'
 import { frontmatterRange } from './frontmatter'
 import { presentMode } from './mode'
 import { renderTitleBlock, type TitleBlock, titleBlockData } from './titleblock'
@@ -43,7 +49,8 @@ function build(state: EditorState): DecorationSet {
   const present = state.facet(presentMode)
   if (!present && !state.field(headerHidden, false)) return Decoration.none
   const range = frontmatterRange(state.doc)
-  if (!range) return Decoration.none
+  // A header-only note stays open: there is nothing to type into otherwise.
+  if (!range || range.to >= state.doc.length) return Decoration.none
   // Outside Present, a selection on the header (e.g. just retyped) keeps it visible.
   if (!present && state.selection.ranges.some((r) => r.from <= range.to && r.to >= range.from)) {
     return Decoration.none
@@ -90,6 +97,24 @@ function clampSelection(tr: Transaction): Transaction | readonly (Transaction | 
   return [tr, { selection, sequential: true }]
 }
 
+function cursorInCollapsedHeader(state: EditorState): boolean {
+  const range = collapsedRange(state)
+  return !!range && state.selection.ranges.some((r) => r.anchor <= range.to || r.head <= range.to)
+}
+
+/** Undo/redo bypass the clamp filter; this moves a cursor that landed in the collapsed header. */
+const keepCursorOut = ViewPlugin.fromClass(
+  class {
+    update(u: { view: EditorView; state: EditorState }): void {
+      if (!cursorInCollapsedHeader(u.state)) return
+      const view = u.view
+      queueMicrotask(() => {
+        if (cursorInCollapsedHeader(view.state)) view.dispatch(moveOutOfHeader(view.state))
+      })
+    }
+  },
+)
+
 /** Preview-only: the collapsed header, atomic and read-only so it is never edited unseen. */
 export const headerFold: StateField<DecorationSet> = StateField.define<DecorationSet>({
   create: build,
@@ -103,6 +128,7 @@ export const headerFold: StateField<DecorationSet> = StateField.define<Decoratio
     EditorView.atomicRanges.of((view) => view.state.field(f)),
     EditorState.changeFilter.of(protectHeader),
     EditorState.transactionFilter.of(clampSelection),
+    keepCursorOut,
   ],
 })
 
