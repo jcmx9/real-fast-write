@@ -65,8 +65,8 @@ export type SaveResult =
   /** path: the note's canonical path when it differs from the one passed (renamed outside). */
   | { ok: true; hash: string; path?: string }
   | { ok: false; error: string }
-  /** Refused without writing: the file changed outside since the tab's base. */
-  | { ok: false; conflict: ExternalChange }
+  /** Refused without writing: the file changed outside since the tab's base (path: see ok). */
+  | { ok: false; conflict: ExternalChange; path?: string }
 export type RenameResult = { ok: true; path: string } | { ok: false; error: string }
 export type ExportResult =
   | { kind: 'ok'; message: string }

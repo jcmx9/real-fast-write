@@ -183,6 +183,22 @@ export async function writeNoteBytes(
   await writeFileAtomic(await realTarget(path), bytes, defaultDeps, beforeRename)
 }
 
+/** Reads once more after a short pause when a lock (AV scanner, sync client) is likely. */
+async function readRetryingOnce(
+  path: string,
+  read: (path: string) => Promise<Buffer>,
+  sleep: AtomicDeps['sleep'],
+): Promise<Buffer> {
+  try {
+    return await read(path)
+  } catch (err) {
+    const code = errorCode(err)
+    if (code === undefined || !RETRY_CODES.has(code)) throw err
+    await sleep(100)
+    return read(path)
+  }
+}
+
 /** What is on disk now, if it is not the content a save was based on. */
 export interface DiskConflict {
   change: ExternalChange
@@ -201,10 +217,14 @@ export async function diskConflict(
   path: string,
   base: string | null,
   isOwn: (hash: string) => boolean,
+  deps: {
+    read: (path: string) => Promise<Buffer>
+    sleep: AtomicDeps['sleep']
+  } = { read: (p) => fs.readFile(p), sleep: defaultDeps.sleep },
 ): Promise<DiskConflict | null> {
   let bytes: Buffer
   try {
-    bytes = await fs.readFile(path)
+    bytes = await readRetryingOnce(path, deps.read, deps.sleep)
   } catch (err) {
     if (errorCode(err) !== 'ENOENT') throw err
     return base === null ? null : { change: { kind: 'deleted', path } }

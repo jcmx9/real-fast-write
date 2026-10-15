@@ -123,7 +123,11 @@ export function registerIpc(ctx: AppContext): void {
           if (!(err instanceof SaveConflict) || !found) throw err
           // The renderer handles this state now; the watcher must not report it again.
           ctx.watcher.acknowledge(p, found.hash ?? null)
-          return { ok: false, conflict: found.change }
+          // After a case-only rename outside, the tab must follow the new spelling first, or
+          // the renderer would not find the tab the conflict belongs to.
+          return p === path
+            ? { ok: false, conflict: found.change }
+            : { ok: false, conflict: found.change, path: p }
         }
         if (ctx.reserved.delete(p)) void ctx.rememberRecent(p).catch(logSessionError)
         // The note's spelling changed outside (case-only rename): the tab follows it.

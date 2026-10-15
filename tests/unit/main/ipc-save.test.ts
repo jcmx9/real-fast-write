@@ -186,4 +186,23 @@ describe('saveNote base check', () => {
     expect(await readdir(dir)).toContain('A.md')
     expect(await readFile(join(dir, 'A.md'), 'utf8')).toBe('getippt')
   })
+
+  it('a refusal after an outside case-only rename carries the new spelling', async () => {
+    const base = await load()
+    const { rename, stat } = await import('node:fs/promises')
+    await rename(note, join(dir, 'A.md'))
+    const insensitive = await stat(note).then(
+      () => true,
+      () => false,
+    )
+    if (!insensitive) return
+    await writeFile(join(dir, 'A.md'), 'von außen')
+    const res = await save(note, 'getippt', base)
+    expect(res).toMatchObject({
+      ok: false,
+      path: join(dir, 'A.md'),
+      conflict: { kind: 'changed', note: { path: join(dir, 'A.md') } },
+    })
+    expect(await readFile(join(dir, 'A.md'), 'utf8')).toBe('von außen')
+  })
 })

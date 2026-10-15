@@ -228,6 +228,36 @@ describe('diskConflict', () => {
     expect(res?.change).toMatchObject({ kind: 'unreadable', reason: 'encoding' })
   })
 
+  it.each(['EPERM', 'EBUSY', 'EACCES'])('reads once more after a transient %s', async (code) => {
+    const path = join(dir, 'a.md')
+    let calls = 0
+    const read = async (p: string) => {
+      calls++
+      if (calls === 1) throw Object.assign(new Error(code), { code })
+      return readFile(p)
+    }
+    await writeFile(path, 'x')
+    const res = await diskConflict(path, hashBytes(Buffer.from('x')), never, {
+      read,
+      sleep: async () => undefined,
+    })
+    expect(res).toBeNull()
+    expect(calls).toBe(2)
+  })
+
+  it('throws when the transient error lasts', async () => {
+    const path = join(dir, 'a.md')
+    let calls = 0
+    const read = async () => {
+      calls++
+      throw Object.assign(new Error('busy'), { code: 'EBUSY' })
+    }
+    await expect(
+      diskConflict(path, 'alt', never, { read, sleep: async () => undefined }),
+    ).rejects.toMatchObject({ code: 'EBUSY' })
+    expect(calls).toBe(2)
+  })
+
   posixOnly('throws other read errors', async () => {
     if (process.getuid?.() === 0) return
     const path = join(dir, 'a.md')

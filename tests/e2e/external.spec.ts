@@ -1,7 +1,7 @@
-import { access, chmod, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, chmod, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { expect } from '@playwright/test'
-import { clickMenu, launch, makeDirs, test, typeInEditor, waitForFile } from './helpers'
+import { clickMenu, launch, MOD, makeDirs, test, typeInEditor, waitForFile } from './helpers'
 
 const tabs = (page: import('@playwright/test').Page) => page.locator('[data-testid=tab]')
 
@@ -207,5 +207,54 @@ test('a save right after an external write (inside the watcher debounce) does no
   await banner.getByRole('button', { name: 'Meine behalten' }).click()
   await waitForFile(file, (b) => b.toString('utf8') === 'alt meins')
   await expect(page.getByTestId('status-state')).toHaveText('Gespeichert')
+  await app.close()
+})
+
+test('after „Meine behalten“ an undo back to the old text is still written', async () => {
+  const dirs = await makeDirs()
+  const file = join(dirs.notes, 'zurueck3.md')
+  await writeFile(file, 'alt')
+  const { app, page } = await launch({ dirs, args: [file] })
+  await expect(page.locator('.cm-content')).toContainText('alt')
+  await typeInEditor(page, ' meins')
+  await writeFile(file, 'von außen')
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')))
+  const banner = page.locator('.banner')
+  await expect(banner).toHaveText(/wurde außerhalb von rf-write geändert/)
+  // Back to the text that was saved last: the tab is clean, the disk holds the outside version.
+  await page.locator('.cm-content').click()
+  await page.keyboard.press(`${MOD}+z`)
+  await expect(page.locator('.cm-content')).toHaveText('alt')
+  await banner.getByRole('button', { name: 'Meine behalten' }).click()
+  await waitForFile(file, (b) => b.toString('utf8') === 'alt')
+  await expect(page.getByTestId('status-state')).toHaveText('Gespeichert')
+  await app.close()
+})
+
+test('a save after an outside case-only rename plus edit shows the conflict', async () => {
+  const dirs = await makeDirs()
+  const file = join(dirs.notes, 'klein.md')
+  const renamed = join(dirs.notes, 'Klein.md')
+  await writeFile(file, 'alt')
+  await writeFile(join(dirs.notes, 'probe-case'), '')
+  test.skip(
+    await access(join(dirs.notes, 'PROBE-CASE')).then(
+      () => false,
+      () => true,
+    ),
+    'needs a case-insensitive file system',
+  )
+  const { app, page } = await launch({ dirs, args: [file] })
+  await expect(page.locator('.cm-content')).toContainText('alt')
+  await rename(file, renamed)
+  await writeFile(renamed, 'von außen')
+  await typeInEditor(page, ' meins')
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')))
+  const banner = page.locator('.banner')
+  await expect(banner).toHaveText(/„Klein\.md“ wurde außerhalb von rf-write geändert\./)
+  await expect(page.locator('[data-testid=tab]')).toContainText('Klein.md')
+  expect(await readFile(renamed, 'utf8')).toBe('von außen')
+  await banner.getByRole('button', { name: 'Meine behalten' }).click()
+  await waitForFile(renamed, (b) => b.toString('utf8') === 'alt meins')
   await app.close()
 })

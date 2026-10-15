@@ -642,8 +642,14 @@ export class App {
       res = { ok: false, error: e instanceof Error ? e.message : String(e) }
     }
     if (!res.ok) {
-      if ('conflict' in res) this.externalChange(res.conflict)
-      else this.saveErrors.set(tab.id, res.error)
+      if ('conflict' in res) {
+        // Follow a case-only rename outside first, so the conflict finds this tab.
+        if (res.path !== undefined && res.path !== tab.path) {
+          this.store.setPath(tab.id, res.path)
+          this.syncMain()
+        }
+        this.externalChange(res.conflict)
+      } else this.saveErrors.set(tab.id, res.error)
       this.refresh()
       return false
     }
@@ -774,6 +780,9 @@ export class App {
           run: () => {
             this.clearConflict(tab.id)
             this.overwrite.add(tab.id)
+            // The disk holds the outside version: write this tab even if it is clean again
+            // (e.g. undone back to the last saved text).
+            this.unwritten.add(tab.id)
             this.refresh()
             this.autosave.touch()
           },
