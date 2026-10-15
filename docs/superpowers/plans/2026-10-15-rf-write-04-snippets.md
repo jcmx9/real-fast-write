@@ -689,3 +689,28 @@ Run: `diff <(grep -c '^## ' README.md) <(grep -c '^## ' README.en.md) && npm run
 git add tests/e2e/snippets.spec.ts README.md README.en.md CHANGELOG.md
 git commit -m "test(e2e): cover snippets end to end; document snippets"
 ```
+
+---
+
+### Task 6: Page break from the menu and Mod+Enter (user request 2026-10-15)
+
+**Files:**
+- Modify: `src/shared/types.ts` (`MenuCommand` + `'insert-pagebreak'`), `src/main/menu.ts` (Bearbeiten → „Seitenumbruch einfügen“, `CmdOrCtrl+Enter`), `src/renderer/app.ts` (handle the command), `src/renderer/editor/setup.ts` (key binding), README de/en shortcut table, CHANGELOG
+- Create: `src/renderer/editor/pagebreak.ts`, `tests/unit/renderer/pagebreak.test.ts`; extend `tests/unit/main/menu.test.ts` and `tests/e2e/snippets.spec.ts`
+
+**Interfaces:**
+- Produces: `export function insertPageBreak(view: EditorView): boolean` (a CodeMirror `Command`), `export const PAGEBREAK = '<!-- pagebreak -->'`.
+
+Behaviour (rf-document syntax: `<!-- pagebreak -->` on its own line):
+- Inserts `<!-- pagebreak -->` as its own paragraph: a blank line before it unless the cursor line is empty and the line above is empty or the document start; a blank line after it unless the next line is already empty. The cursor ends on the line after the break (start of the following empty line).
+- If text is selected, the selection is replaced by the break (same rules).
+- A cursor in the middle of a line splits the line: text before stays, the break follows as its own paragraph, the rest of the line continues after it.
+- Works in Code, Preview and Present; refused nowhere (it is plain text editing). In Present the cursor is never in the collapsed header, so the break never lands inside the front matter.
+- One undo step (`userEvent: 'input.pagebreak'`). Uses the state's line break (`state.lineBreak`), so CRLF notes stay consistent.
+- Key: `Mod-Enter` with higher precedence than CodeMirror's default `insertBlankLine` binding; menu accelerator `CmdOrCtrl+Enter` (E2E clicks the menu item `insert-pagebreak`). The renderer binding and the menu accelerator must not both fire (check how zoom keys avoid double handling and follow that pattern).
+
+Tests (state/view level, parametrised): empty doc → `<!-- pagebreak -->\n` with cursor at end + correct; `Text|` → `Text\n\n<!-- pagebreak -->\n\n`; `A|B` → `A\n\n<!-- pagebreak -->\n\nB`; cursor on an empty line between paragraphs → no doubled blank lines; selection replaced; CRLF doc keeps CRLF on save (serializeDoc); undo restores the exact original. Menu test: item `insert-pagebreak` exists in Bearbeiten with accelerator `CmdOrCtrl+Enter`. E2E: menu click in a note writes `<!-- pagebreak -->` to the saved file.
+
+Docs: README de/en shortcut row „Mod+Enter | Seitenumbruch einfügen (`<!-- pagebreak -->`, wie rf-document)“; CHANGELOG Added: "Insert a page break (`<!-- pagebreak -->`) from the Edit menu or with Mod+Enter".
+
+Commit: `feat(edit): insert a page break from the menu or with Mod+Enter`
