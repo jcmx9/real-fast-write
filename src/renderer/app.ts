@@ -37,7 +37,7 @@ import { TabBar } from './ui/tabbar'
 import { editorSizes, handleZoomKey, zoomIn, zoomOut } from './ui/zoom'
 import { closeWindow } from './util/close-guard'
 import { fileName } from './util/path'
-import { SerialQueue } from './util/serial'
+import { LatestToggle, SerialQueue } from './util/serial'
 
 const INSTALL_HINT = [
   'macOS/Linux:',
@@ -87,6 +87,14 @@ export class App {
    * fullscreen survives Present) and never reports its own leave as an OS leave.
    */
   private readonly fullScreenOps = new SerialQueue()
+  /**
+   * Toggle-present while a fullscreen request is in flight (main settles an enter only once
+   * the window is fullscreen or the OS refused it) is remembered, not dropped: last intent wins.
+   */
+  private readonly presentToggle = new LatestToggle(
+    () => this.mode === 'present',
+    (on) => (on ? this.enterPresent() : this.exitPresent()),
+  )
   private shownId: number | null = null
   private readonly saveErrors = new Map<number, string>()
   /** Tabs held after an external change: no saving until the user answers the banner. */
@@ -140,6 +148,11 @@ export class App {
     )
     this.rfw.onFullScreenLeft(() => {
       if (this.mode === 'present') void this.exitPresent(false)
+    })
+    this.rfw.onFullScreenRefused(() => {
+      // A meeting must not lose Present because the OS refused fullscreen.
+      if (this.mode === 'present')
+        this.notices.toast('Vollbild nicht verfügbar – Präsentation im Fenster')
     })
     root.empty
       .querySelector('[data-action=new]')
@@ -258,9 +271,7 @@ export class App {
       case 'zoom-reset':
         return this.setZoom(1)
       case 'toggle-present':
-        // A held or hammered shortcut must not flap while a fullscreen request is in flight.
-        if (this.fullScreenOps.busy) return
-        return this.mode === 'present' ? this.exitPresent() : this.enterPresent()
+        return this.presentToggle.toggle()
     }
   }
 

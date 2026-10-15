@@ -108,8 +108,13 @@ export class AppContext {
       this.rendererReady = false
     })
     win.on('closed', () => {
+      this.fullScreen.dispose()
       this.window = null
       this.rendererReady = false
+    })
+    win.on('enter-full-screen', () => {
+      // A refused enter that arrives after Present already ended: Edit is never fullscreen.
+      if (this.fullScreen.onEnter()) win.setFullScreen(false)
     })
     win.on('leave-full-screen', () => {
       // Only an OS-initiated leave ends Present; the app already knows about its own (and

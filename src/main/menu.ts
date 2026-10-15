@@ -12,8 +12,15 @@ export interface MenuDeps {
   now?: () => number
 }
 
-/** Key repeats closer than this belong to one held shortcut. */
-const KEY_REPEAT_MS = 500
+/**
+ * Accelerator events closer than this belong to one held shortcut. Electron's menu click
+ * carries no auto-repeat flag, so time is the only signal. Once auto-repeat runs it fires
+ * every ~30–50 ms, which this window swallows; the OS's initial repeat delay is at least
+ * 250 ms by default on macOS, Windows and Linux, so two deliberate presses more than 250 ms
+ * apart both toggle. Limit: the first repeat after that initial delay is indistinguishable
+ * from a second press and toggles too.
+ */
+const KEY_REPEAT_MS = 250
 
 /** Electron passes this as the click handler's third argument. */
 interface ClickEvent {
@@ -23,7 +30,7 @@ interface ClickEvent {
 export function buildMenuTemplate(d: MenuDeps): MenuItemConstructorOptions[] {
   const mac = d.platform === 'darwin'
   const now = d.now ?? Date.now
-  // A held Cmd/Ctrl+Shift+P repeats; only the first press toggles Present (no flapping).
+  // A held Cmd/Ctrl+Shift+P repeats; its fast repeat stream must not flap Present.
   let lastPresentKey = Number.NEGATIVE_INFINITY
   const heldRepeat = (id: MenuCommand, event: ClickEvent | undefined): boolean => {
     if (id !== 'toggle-present' || !event?.triggeredByAccelerator) return false

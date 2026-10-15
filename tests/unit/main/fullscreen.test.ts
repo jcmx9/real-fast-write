@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest'
-import { FullScreenOwner } from '../../../src/main/fullscreen'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  FullScreenOwner,
+  type FullScreenWindow,
+  REFUSED_MS,
+  setWindowFullScreen,
+} from '../../../src/main/fullscreen'
 
 describe('FullScreenOwner', () => {
   it('enters and leaves a fullscreen the app requested; its own leave is not reported', () => {
@@ -70,5 +75,142 @@ describe('FullScreenOwner', () => {
     expect(o.request(true, true)).toEqual({ set: null, was: true })
     expect(o.request(false, true)).toEqual({ set: null, was: true })
     expect(o.onLeave()).toBe(true) // the user leaving their own fullscreen is an OS leave
+  })
+})
+
+/** A window whose fullscreen requests only take effect when `enter()`/`leave()` are called. */
+function fakeWindow(): FullScreenWindow & { full: boolean; calls: boolean[] } {
+  return {
+    full: false,
+    calls: [],
+    isFullScreen() {
+      return this.full
+    },
+    setFullScreen(on: boolean) {
+      this.calls.push(on)
+    },
+  }
+}
+
+describe('setWindowFullScreen: refused enter', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('reports a refusal when the window never enters, and resets the intent', async () => {
+    const o = new FullScreenOwner()
+    const win = fakeWindow()
+    const refused = vi.fn()
+    let settled = false
+    const done = setWindowFullScreen(o, win, true, refused).then((was) => {
+      settled = true
+      return was
+    })
+    expect(win.calls).toEqual([true])
+    await vi.advanceTimersByTimeAsync(REFUSED_MS - 1)
+    expect(settled).toBe(false)
+    expect(refused).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(await done).toBe(false)
+    expect(refused).toHaveBeenCalledTimes(1)
+    // Not app-owned any more: leaving Present does not touch the window ...
+    expect(o.request(false, false)).toEqual({ set: null, was: false })
+    // ... and a later OS leave is reported again (no stale pending leaves).
+    expect(o.onLeave()).toBe(true)
+  })
+
+  it('a refusal also drops leaves still pending for that enter', async () => {
+    const o = new FullScreenOwner()
+    const win = fakeWindow()
+    const refused = vi.fn()
+    const enter = setWindowFullScreen(o, win, true, refused)
+    o.request(false, false) // a leave counted while the enter was in flight
+    await vi.advanceTimersByTimeAsync(REFUSED_MS)
+    await enter
+    expect(o.onLeave()).toBe(true)
+  })
+
+  it('settles at once on enter-full-screen; no refusal', async () => {
+    const o = new FullScreenOwner()
+    const win = fakeWindow()
+    const refused = vi.fn()
+    const done = setWindowFullScreen(o, win, true, refused)
+    await vi.advanceTimersByTimeAsync(500)
+    win.full = true
+    expect(o.onEnter()).toBe(false)
+    expect(await done).toBe(false)
+    await vi.advanceTimersByTimeAsync(REFUSED_MS * 2)
+    expect(refused).not.toHaveBeenCalled()
+    expect(o.request(false, true)).toEqual({ set: false, was: false })
+  })
+
+  it('no refusal when the window is fullscreen at the deadline without an event', async () => {
+    const o = new FullScreenOwner()
+    const win = fakeWindow()
+    const refused = vi.fn()
+    const done = setWindowFullScreen(o, win, true, refused)
+    win.full = true
+    await vi.advanceTimersByTimeAsync(REFUSED_MS)
+    await done
+    expect(refused).not.toHaveBeenCalled()
+    expect(o.request(false, true).set).toBe(false)
+  })
+
+  it('a late enter after a refusal is adopted while Present still wants fullscreen', async () => {
+    const o = new FullScreenOwner()
+    const win = fakeWindow()
+    const done = setWindowFullScreen(o, win, true, vi.fn())
+    await vi.advanceTimersByTimeAsync(REFUSED_MS)
+    await done
+    win.full = true
+    expect(o.onEnter()).toBe(false) // stay fullscreen, owned by the app again
+    expect(o.request(false, true)).toEqual({ set: false, was: false })
+    expect(o.onLeave()).toBe(false)
+  })
+
+  it('a late enter after Present already ended is left again at once', async () => {
+    const o = new FullScreenOwner()
+    const win = fakeWindow()
+    const done = setWindowFullScreen(o, win, true, vi.fn())
+    await vi.advanceTimersByTimeAsync(REFUSED_MS)
+    await done
+    expect(await setWindowFullScreen(o, win, false, vi.fn())).toBe(false)
+    win.full = true
+    expect(o.onEnter()).toBe(true) // the caller leaves fullscreen: Edit is never fullscreen
+    expect(o.onLeave()).toBe(false) // that leave is the app's own
+  })
+
+  it("an enter long after a refusal is the user's own", async () => {
+    const o = new FullScreenOwner()
+    const win = fakeWindow()
+    const done = setWindowFullScreen(o, win, true, vi.fn())
+    await vi.advanceTimersByTimeAsync(REFUSED_MS)
+    await done
+    await setWindowFullScreen(o, win, false, vi.fn())
+    await vi.advanceTimersByTimeAsync(60_000)
+    win.full = true
+    expect(o.onEnter()).toBe(false)
+    expect(o.request(true, true)).toEqual({ set: null, was: true })
+  })
+
+  it("leaves and the user's own fullscreen settle immediately", async () => {
+    const o = new FullScreenOwner()
+    const win = fakeWindow()
+    win.full = true
+    expect(await setWindowFullScreen(o, win, true, vi.fn())).toBe(true)
+    expect(await setWindowFullScreen(o, win, false, vi.fn())).toBe(true)
+    expect(win.calls).toEqual([])
+  })
+
+  it('dispose cancels a pending refusal', async () => {
+    const o = new FullScreenOwner()
+    const refused = vi.fn()
+    void setWindowFullScreen(o, fakeWindow(), true, refused)
+    o.dispose()
+    await vi.advanceTimersByTimeAsync(REFUSED_MS * 2)
+    expect(refused).not.toHaveBeenCalled()
   })
 })

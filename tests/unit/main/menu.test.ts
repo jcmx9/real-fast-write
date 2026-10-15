@@ -77,6 +77,21 @@ describe('buildMenuTemplate', () => {
     expect(d.command).toHaveBeenCalledTimes(3)
   })
 
+  it('two deliberate presses 300 ms apart both toggle Present', () => {
+    let now = 1000
+    const d = deps({ now: () => now })
+    const item = byId(buildMenuTemplate(d), 'toggle-present')
+    if (!item) throw new Error('menu item not found')
+    const key = () =>
+      (item.click as unknown as (a: unknown, b: unknown, e: unknown) => void)(null, null, {
+        triggeredByAccelerator: true,
+      })
+    key()
+    now += 300
+    key()
+    expect(d.command).toHaveBeenCalledTimes(2)
+  })
+
   it('has an app menu on macOS and a quit item elsewhere', () => {
     expect(buildMenuTemplate(deps())[0]?.role).toBe('appMenu')
     const winItems = flatten(buildMenuTemplate(deps({ platform: 'win32' })))

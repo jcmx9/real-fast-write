@@ -28,6 +28,9 @@ const api: RfwApi = {
   onFullScreenLeft: (cb) => {
     ipcRenderer.on(Ch.fullScreenLeft, () => cb())
   },
+  onFullScreenRefused: (cb) => {
+    ipcRenderer.on(Ch.fullScreenRefused, () => cb())
+  },
   onBeforeClose: (cb) => {
     ipcRenderer.on(Ch.beforeClose, async () => {
       let ok = false

@@ -112,6 +112,8 @@ export interface RfwApi {
   /** Resolves to whether the user (not the app) had the window fullscreen before the change. */
   setFullScreen(on: boolean): Promise<boolean>
   onFullScreenLeft(cb: () => void): void
+  /** The OS did not enter the fullscreen the app requested; Present continues windowed. */
+  onFullScreenRefused(cb: () => void): void
   listSnippets(): Promise<SnippetDef[]>
 }
 

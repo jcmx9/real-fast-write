@@ -12,6 +12,7 @@ import {
   renameNote,
   writeNoteBytes,
 } from './files'
+import { setWindowFullScreen } from './fullscreen'
 import { loadUserSnippets } from './snippets'
 
 const str = (v: unknown): string => {
@@ -28,16 +29,25 @@ export function registerIpc(ctx: AppContext): void {
    * The app only leaves a fullscreen it requested itself (FullScreenOwner); returns whether
    * the user had the window fullscreen before the request.
    */
-  ipcMain.handle(Ch.setFullScreen, (e, on: unknown): boolean => {
+  ipcMain.handle(Ch.setFullScreen, (e, on: unknown): Promise<boolean> | boolean => {
     const win = BrowserWindow.fromWebContents(e.sender)
     if (!win) return false
     const flag = on === true
-    const action = ctx.fullScreen.request(flag, win.isFullScreen())
     // macOS hides the menu bar in fullscreen itself; Windows/Linux need it hidden explicitly,
     // and shown again on leaving Present even when the user's own fullscreen stays.
     if (process.platform !== 'darwin') win.setMenuBarVisibility(!flag)
-    if (action.set !== null) win.setFullScreen(action.set)
-    return action.was
+    // An enter settles when it took effect or the OS refused it (then Present stays windowed).
+    return setWindowFullScreen(
+      ctx.fullScreen,
+      {
+        isFullScreen: () => !win.isDestroyed() && win.isFullScreen(),
+        setFullScreen: (set) => win.setFullScreen(set),
+      },
+      flag,
+      () => {
+        if (!win.isDestroyed()) win.webContents.send(Ch.fullScreenRefused)
+      },
+    )
   })
 
   ipcMain.handle(Ch.readNote, async (_e, path: unknown): Promise<NoteFile | { error: string }> => {
