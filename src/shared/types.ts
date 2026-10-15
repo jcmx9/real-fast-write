@@ -75,6 +75,9 @@ export type MenuCommand =
   | 'unfold'
   | 'fold-all'
   | 'unfold-all'
+  | 'zoom-in'
+  | 'zoom-out'
+  | 'zoom-reset'
 
 export interface RfwApi {
   startup(): Promise<StartupState>

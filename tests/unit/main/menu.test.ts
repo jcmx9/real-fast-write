@@ -40,6 +40,9 @@ describe('buildMenuTemplate', () => {
     ['unfold', 'Cmd+Alt+]'],
     ['fold-all', 'Ctrl+Alt+['],
     ['unfold-all', 'Ctrl+Alt+]'],
+    ['zoom-in', 'CmdOrCtrl+Plus'],
+    ['zoom-out', 'CmdOrCtrl+-'],
+    ['zoom-reset', 'CmdOrCtrl+0'],
   ])('%s has accelerator %s and sends its command', (id, accelerator) => {
     const d = deps()
     const item = byId(buildMenuTemplate(d), id)
@@ -98,6 +101,9 @@ describe('buildMenuTemplate', () => {
       'unfold',
       'fold-all',
       'unfold-all',
+      'zoom-in',
+      'zoom-out',
+      'zoom-reset',
     ])
   })
 })

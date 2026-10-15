@@ -2,7 +2,7 @@ import { redo, selectAll, undo } from '@codemirror/commands'
 import { foldCode, unfoldAll, unfoldCode } from '@codemirror/language'
 import type { TransactionSpec } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
-import type { ExportResult, MenuCommand, NoteFile, View } from '../shared/types'
+import type { ExportResult, MenuCommand, Mode, NoteFile, View } from '../shared/types'
 import { AutosaveScheduler } from './editor/autosave'
 import { headerHidden, headerToggleSpec } from './editor/header'
 import { foldAllSections } from './editor/sections'
@@ -12,6 +12,7 @@ import { Notices } from './ui/notices'
 import { askText } from './ui/prompt'
 import { type SaveState, StatusLine } from './ui/statusline'
 import { TabBar } from './ui/tabbar'
+import { editorSizes, zoomIn, zoomOut } from './ui/zoom'
 import { fileName } from './util/path'
 
 const INSTALL_HINT = [
@@ -45,6 +46,9 @@ export class App {
   private readonly status: StatusLine
   private readonly notices: Notices
   private view: View = 'preview'
+  private mode: Mode = 'edit'
+  private zoom = { edit: 1, present: 1 }
+  private presentFactor = 1.6
   private shownId: number | null = null
   private readonly saveErrors = new Map<number, string>()
   private readonly conflicts = new Set<number>()
@@ -96,6 +100,9 @@ export class App {
       )
     }
     this.view = startup.session.view
+    this.zoom = { ...startup.session.zoom }
+    this.presentFactor = startup.settings.presentFontFactor
+    this.applyZoom()
     for (const t of startup.session.tabs) await this.openPath(t.path, t.headerHidden)
     const activePath = startup.session.tabs[startup.session.activeIndex]?.path
     const activeTab = activePath === undefined ? undefined : this.store.findByPath(activePath)
@@ -156,6 +163,12 @@ export class App {
         unfoldAll(this.editor)
         this.editor.focus()
         return
+      case 'zoom-in':
+        return this.setZoom(zoomIn(this.zoom[this.mode]))
+      case 'zoom-out':
+        return this.setZoom(zoomOut(this.zoom[this.mode]))
+      case 'zoom-reset':
+        return this.setZoom(1)
     }
   }
 
@@ -176,10 +189,29 @@ export class App {
 
   private globalKeys(e: KeyboardEvent): void {
     const mod = isMac ? e.metaKey : e.ctrlKey
+    if (mod && !e.altKey && e.key === '=') {
+      e.preventDefault()
+      this.setZoom(zoomIn(this.zoom[this.mode]))
+      return
+    }
     if (mod && !e.shiftKey && !e.altKey && /^[1-9]$/.test(e.key)) {
       e.preventDefault()
       this.activate(Number(e.key) - 1)
     }
+  }
+
+  private setZoom(next: number): void {
+    this.zoom[this.mode] = Math.min(3, Math.max(0.5, next))
+    this.applyZoom()
+    this.syncMain()
+  }
+
+  /** Scales the editor via CSS custom properties (never Electron page zoom). */
+  private applyZoom(): void {
+    const { body, code } = editorSizes(this.mode, this.zoom[this.mode], this.presentFactor)
+    this.root.editor.style.setProperty('--rf-body-size', body)
+    this.root.editor.style.setProperty('--rf-code-size', code)
+    this.editor.requestMeasure()
   }
 
   private activate(index: number): void {
@@ -529,6 +561,6 @@ export class App {
       0,
       tabs.findIndex((t) => t.path === activePath),
     )
-    await this.rfw.saveSession({ tabs, activeIndex, view: this.view })
+    await this.rfw.saveSession({ tabs, activeIndex, view: this.view, zoom: this.zoom })
   }
 }

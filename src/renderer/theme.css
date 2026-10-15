@@ -71,7 +71,7 @@
 
 .rf-code .cm-scroller {
   font-family: var(--rfd-font-code);
-  font-size: 9pt;
+  font-size: var(--rf-code-size, 9pt);
   line-height: 1.5;
 }
 .rf-code .rf-tok-heading {

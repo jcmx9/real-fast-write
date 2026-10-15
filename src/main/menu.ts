@@ -74,6 +74,10 @@ export function buildMenuTemplate(d: MenuDeps): MenuItemConstructorOptions[] {
       // Not Ctrl+Alt on Windows/Linux: that is AltGr, which types `[` / `]` on German layouts.
       item('fold-all', 'Alle einklappen', mac ? 'Ctrl+Alt+[' : 'Alt+0'),
       item('unfold-all', 'Alle ausklappen', mac ? 'Ctrl+Alt+]' : 'Alt+Shift+0'),
+      sep,
+      item('zoom-in', 'Vergrößern', 'CmdOrCtrl+Plus'),
+      item('zoom-out', 'Verkleinern', 'CmdOrCtrl+-'),
+      item('zoom-reset', 'Originalgröße', 'CmdOrCtrl+0'),
       ...(d.isDev
         ? [
             sep,
