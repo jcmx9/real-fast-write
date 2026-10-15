@@ -7,8 +7,9 @@
 #
 # dev   On `dev`: bump YY.M.MICRO-dev.N -> -dev.N+1, commit, tag v<version>, push
 #       branch and tag atomically (the tag builds a GitHub pre-release).
-# prod  From `dev`: release branch on top of main (dev's commits replayed, so GitHub's
-#       rebase-merge is conflict-free) -> PR into `main` -> wait for green checks ->
+# prod  From `dev`: release branch = one snapshot commit on top of main (tree = dev's tree
+#       + version + CHANGELOG; main's changes must already be in dev) -> PR into `main`
+#       (single commit, rebase-merge keeps main linear) -> wait for green checks ->
 #       rebase-merge -> verify package.json on main -> tag on main -> push tag ->
 #       back-merge PR into dev (merge of main into dev; only the version lines may
 #       conflict), dev continues at the next MICRO as -dev.0.
@@ -96,6 +97,13 @@ note() {
 
 g() {
   git -C "${root}" "$@"
+}
+
+# Commits made by this script: the repo's configured author and nothing else. No hooks or
+# sign-off can add trailers (Signed-off-by, Co-authored-by); the only trailer the script
+# writes is the technical Release-Source.
+commit_plain() {
+  git -C "${root}" -c core.hooksPath=/dev/null commit -q --no-verify --no-signoff "$@"
 }
 
 read_version_from_json() {
@@ -345,92 +353,42 @@ last_release_source() {
     sed -n 's/^Release-Source: \([0-9a-f]\{7,\}\)[[:space:]]*$/\1/p' | head -n 1
 }
 
-# Abort an in-progress release-branch build: back to dev, nothing pushed.
-abort_replay() {
-  g cherry-pick --abort >/dev/null 2>&1 || true
-  g checkout -q dev
-  die "$1" "$2"
+# Guard for the snapshot: every change on main must already be in dev, because the release
+# commit takes dev's tree as it is. True when main is an ancestor of dev, or when merging main
+# into dev is clean and changes nothing (e.g. a hotfix committed to main and to dev).
+main_contained_in_dev() {
+  g merge-base --is-ancestor "${remote}/main" "${remote}/dev" && return 0
+  local merged
+  merged="$(g merge-tree --write-tree "${remote}/dev" "${remote}/main" 2>/dev/null | head -n 1)" || return 1
+  [[ -n "${merged}" && "${merged}" == "$(g rev-parse "${remote}/dev^{tree}")" ]]
 }
 
-# Cherry-pick one dev commit onto the release branch. Version-line conflicts take the
-# commit's side; a commit that is already contained becomes empty and is skipped.
-replay_commit() {
-  local c="$1" conflicted
-  if g -c merge.conflictStyle=merge cherry-pick "${c}" >/dev/null 2>&1; then
-    return
-  fi
-  conflicted="$(conflicted_files)"
-  if [[ -z "${conflicted}" ]]; then
-    if g rev-parse -q --verify CHERRY_PICK_HEAD >/dev/null; then
-      g cherry-pick --skip >/dev/null 2>&1 || abort_replay "${EXIT_STEP}" "cherry-pick ${c} ließ sich nicht überspringen."
-      return
-    fi
-    abort_replay "${EXIT_STEP}" "cherry-pick ${c} fehlgeschlagen."
-  fi
-  local files=()
-  while IFS= read -r f; do files+=("${f}"); done <<<"${conflicted}"
-  if ! only_version_conflicts "${files[@]}"; then
-    abort_replay "${EXIT_CONFLICT}" "Commit ${c} aus dev lässt sich nicht auf ${remote}/main übertragen (Konflikt in: ${files[*]}). Nichts wurde gepusht. Erst main in dev mergen (Konflikte lösen), dann erneut starten."
-  fi
-  for f in "${files[@]}"; do resolve_side theirs "${f}"; done
-  g add -- "${files[@]}"
-  if g diff --cached --quiet; then
-    g cherry-pick --skip >/dev/null 2>&1 || abort_replay "${EXIT_STEP}" "cherry-pick ${c} ließ sich nicht überspringen."
-  else
-    GIT_EDITOR=true g cherry-pick --continue >/dev/null 2>&1 || abort_replay "${EXIT_STEP}" "cherry-pick ${c} ließ sich nicht abschließen."
-  fi
-}
-
-# The release branch may differ from origin/dev only in the "version" lines of
-# package.json/package-lock.json.
-require_same_content() {
-  local names
-  names="$(g diff --name-only "${remote}/dev" HEAD)"
-  local ok=1
-  while IFS= read -r f; do
-    [[ -z "${f}" ]] && continue
-    case "${f}" in package.json | package-lock.json) ;; *) ok=0 ;; esac
-  done <<<"${names}"
-  if [[ "${ok}" -eq 1 ]] && ! g diff --no-color -U0 "${remote}/dev" HEAD |
-    awk '
-      /^(\+\+\+|---) / { next }
-      /^[+-]/ && $0 !~ /^[+-][[:space:]]*"version"[[:space:]]*:/ { bad = 1 }
-      END { exit bad ? 1 : 0 }
-    '; then
-    ok=0
-  fi
-  if [[ "${ok}" -eq 0 ]]; then
-    g checkout -q dev
-    die "${EXIT_STEP}" "Der Release-Branch weicht inhaltlich von ${remote}/dev ab (${names//$'\n'/, }). Nichts wurde gepusht."
-  fi
-}
-
-# release/<version>: origin/main plus dev's unreleased commits, then the release commit.
+# release/<version>: ONE snapshot commit on top of origin/main whose tree is origin/dev's
+# tree plus the release version and the rolled CHANGELOG. No per-commit replay, so earlier
+# conflict resolutions on dev can never block a release.
 build_release_branch() {
-  local version="$1" branch="$2" src base
+  local version="$1" branch="$2" src
   src="$(g rev-parse "${remote}/dev")"
+  if ! main_contained_in_dev; then
+    g checkout -q dev
+    die "${EXIT_CONFLICT}" "${remote}/main enthält Änderungen, die nicht in ${remote}/dev sind. Erst main per PR in dev mergen (Konflikte dort lösen), dann erneut starten: git checkout -b chore/sync-main ${remote}/dev && git merge ${remote}/main. Nichts wurde gepusht."
+  fi
   if g rev-parse -q --verify "refs/heads/${branch}" >/dev/null; then
     note "Lokaler Branch ${branch} (abgebrochener Lauf) wird neu aufgebaut."
   fi
   g checkout -q -B "${branch}" "${remote}/main"
-  local exclude=("^${remote}/main")
-  base="$(last_release_source)"
-  if [[ -n "${base}" ]]; then
-    g merge-base --is-ancestor "${base}" "${src}" 2>/dev/null ||
-      abort_replay "${EXIT_STEP}" "Release-Source ${base} des letzten Releases ist nicht in ${remote}/dev."
-    exclude+=("^${base}")
-  fi
-  local commits
-  commits="$(g rev-list --reverse --no-merges "${src}" "${exclude[@]}")"
-  while IFS= read -r c; do
-    [[ -n "${c}" ]] && replay_commit "${c}"
-  done <<<"${commits}"
-  require_same_content
+  # Index and working tree become exactly dev's tree (files only on main are removed).
+  g read-tree -u --reset "${src}" || { g checkout -q -f dev; die "${EXIT_STEP}" "read-tree ${src} fehlgeschlagen."; }
   bump_files "${version}"
   roll_changelog "${version}"
   g add -- "${version_files[@]}"
-  g commit -q -m "release: ${version}" -m "Release-Source: ${src}" ||
-    abort_replay "${EXIT_STEP}" "Release-Commit fehlgeschlagen."
+  commit_plain -m "release: ${version}" -m "Release-Source: ${src}" ||
+    { g checkout -q -f dev; die "${EXIT_STEP}" "Release-Commit fehlgeschlagen."; }
+}
+
+# Release-Source trailer of a commit (empty when it has none).
+release_source_of() {
+  g log -1 --format=%B "$1" | sed -n 's/^Release-Source: \([0-9a-f]\{7,\}\)[[:space:]]*$/\1/p' | head -n 1
 }
 
 pr_state() {
@@ -475,14 +433,18 @@ pr_flow() {
 
 release_to_main() {
   local version="$1" branch="release/$1"
-  step "Release-Branch ${branch} auf Basis von ${remote}/main"
+  step "Release-Branch ${branch}: Snapshot von ${remote}/dev auf ${remote}/main"
   if remote_branch_exists "${branch}"; then
     fetch_branch "${branch}"
-    if [[ "$(version_at "${remote}/${branch}")" == "${version}" ]] &&
-      g merge-base --is-ancestor "${remote}/main" "${remote}/${branch}"; then
-      note "${remote}/${branch} existiert bereits und wird weiterverwendet."
+    local ref="${remote}/${branch}" source
+    source="$(release_source_of "${ref}")"
+    if [[ "$(g log -1 --format=%s "${ref}")" == "release: ${version}" &&
+      "$(version_at "${ref}")" == "${version}" &&
+      "$(g rev-parse "${ref}^")" == "$(g rev-parse "${remote}/main")" &&
+      "${source}" == "$(g rev-parse "${remote}/dev")" ]]; then
+      note "${ref} existiert bereits (Stand ${remote}/dev) und wird weiterverwendet."
     else
-      die "${EXIT_STEP}" "${remote}/${branch} existiert, passt aber nicht zu ${version} auf ${remote}/main. Prüfen und ggf. löschen: git push ${remote} --delete ${branch}"
+      die "${EXIT_STEP}" "${ref} passt nicht mehr zu ${remote}/dev bzw. ${remote}/main (Release-Source ${source:-fehlt}). Löschen und neu aufbauen lassen: git push ${remote} --delete ${branch} && scripts/release.sh prod"
     fi
   else
     build_release_branch "${version}" "${branch}"
@@ -570,7 +532,7 @@ back_merge() {
     fi
     bump_files "${next_dev}"
     g add -- "${version_files[@]}"
-    g commit -q -m "chore(release): back-merge ${tag} into dev" -m "dev continues at ${next_dev}." ||
+    commit_plain -m "chore(release): back-merge ${tag} into dev" -m "dev continues at ${next_dev}." ||
       die "${EXIT_STEP}" "Back-Merge-Commit fehlgeschlagen."
     run g push -q -u "${remote}" "${branch}"
     g checkout -q dev
@@ -601,7 +563,7 @@ release_dev() {
   step "Bump ${cur} -> ${next}"
   bump_files "${next}"
   run git -C "${root}" add -- "${version_files[@]}"
-  run git -C "${root}" commit -q -m "release: ${next}"
+  run commit_plain -m "release: ${next}"
   step "Tag v${next} und Push (atomar; löst den Pre-Release-Workflow aus)"
   run git -C "${root}" tag -a "v${next}" -m "Release ${next}"
   run git -C "${root}" push -q --atomic "${remote}" dev "refs/tags/v${next}"
@@ -610,10 +572,10 @@ release_dev() {
 
 print_prod_plan() {
   local version="$1" next_dev="$2" tag="v$1"
-  echo "[dry-run] git -C ${root} checkout -B release/${version} ${remote}/main; unveröffentlichte dev-Commits per cherry-pick übernehmen"
+  echo "[dry-run] prüfen, dass ${remote}/main in ${remote}/dev enthalten ist; git -C ${root} checkout -B release/${version} ${remote}/main; git read-tree -u --reset ${remote}/dev"
   run npm version "${version}" --no-git-tag-version --allow-same-version
   roll_changelog "${version}"
-  run git -C "${root}" commit -m "release: ${version}" -m "Release-Source: <${remote}/dev>"
+  run commit_plain -m "release: ${version}" -m "Release-Source: <${remote}/dev>"
   run git -C "${root}" push -u "${remote}" "release/${version}"
   run gh pr create -R "${gh_repo}" --base main --head "release/${version}" --title "release: ${version}"
   echo "[dry-run] warten, bis Checks registriert sind; gh pr checks release/${version} -R ${gh_repo} --watch --fail-fast"

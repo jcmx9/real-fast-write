@@ -5,6 +5,7 @@
 #
 # 1. Version arithmetic via `--print-next`.
 # 2. `--dry-run` for dev and prod against the real checkout (must change nothing, no network).
+# 4. scripts/release-notes.sh (the release workflow's notes from CHANGELOG.md).
 # 3. Full flows in a throwaway repo below a temp dir, with a bare repo as fake origin and
 #    fake `npm`/`gh` on PATH. The fake `gh pr merge --rebase` behaves like GitHub: it
 #    cherry-picks the PR's commits onto the base with a new committer, so SHAs change, and
@@ -184,6 +185,10 @@ case "${sub}" in
   "pr view")
     f="${state}/$(key "${pos[0]}").state"
     [[ -f "${f}" ]] || { echo "no pull requests found for branch \"${pos[0]}\"" >&2; exit 1; }
+    # GitHub closes an open PR whose head branch was deleted.
+    if [[ "$(cat "${f}")" == OPEN ]] && ! git -C "${bare}" rev-parse -q --verify "refs/heads/${pos[0]}" >/dev/null; then
+      echo CLOSED >"${f}"
+    fi
     cat "${f}"
     ;;
   "pr checks")
@@ -241,6 +246,16 @@ setup_repo() {
   printf '{\n  "name": "x",\n  "version": "26.10.0-dev.0",\n  "lockfileVersion": 3,\n  "packages": {\n    "": {\n      "name": "x",\n      "version": "26.10.0-dev.0"\n    }\n  }\n}\n' >"${work}/package-lock.json"
   printf '# Changelog\n\n## [Unreleased]\n\n### Added\n- first\n' >"${work}/CHANGELOG.md"
   echo base >"${work}/a.txt"
+  # Hooks that add attribution trailers: release.sh must bypass them.
+  cat >"${work}/.git/hooks/prepare-commit-msg" <<'HOOK'
+#!/bin/sh
+printf '\nCo-authored-by: Bot <bot@example.invalid>\n' >>"$1"
+HOOK
+  cat >"${work}/.git/hooks/commit-msg" <<'HOOK'
+#!/bin/sh
+printf 'Signed-off-by: Bot <bot@example.invalid>\n' >>"$1"
+HOOK
+  chmod +x "${work}/.git/hooks/prepare-commit-msg" "${work}/.git/hooks/commit-msg"
   git -C "${work}" add -A
   git -C "${work}" commit -q -m init
   git -C "${work}" remote add origin "${FAKE_ORIGIN}"
@@ -256,6 +271,37 @@ dev_commit() {
   git -C "${work}" add -A
   git -C "${work}" commit -q -m "feat: ${file}"
   git -C "${work}" push -q origin dev
+}
+
+# A hotfix committed directly to origin/main.
+main_hotfix() {
+  local file="$1" content="$2" hf="${tmp}/hotfix"
+  rm -rf "${hf}"
+  git clone -q -b main "${FAKE_ORIGIN}" "${hf}"
+  echo "${content}" >"${hf}/${file}"
+  git -C "${hf}" -c core.hooksPath=/dev/null commit -q -am "fix: hotfix ${file}"
+  git -C "${hf}" push -q origin main
+  rm -rf "${hf}"
+}
+
+# Commits release.sh made carry no attribution trailers; release commits exactly one
+# Release-Source trailer; the author is the configured one.
+expect_plain_script_commits() {
+  local label="$1" sha subject trailers
+  while IFS=$'\t' read -r sha subject; do
+    case "${subject}" in
+      "release: "* | "chore(release): back-merge "*) ;;
+      *) continue ;;
+    esac
+    trailers="$(git -C "${FAKE_ORIGIN}" log -1 --format='%(trailers:unfold)' "${sha}" | sed '/^$/d')"
+    if [[ "${subject}" == release:\ [0-9]*.[0-9]*.[0-9]* && "${subject}" != *-dev.* ]]; then
+      [[ "${trailers}" =~ ^Release-Source:\ [0-9a-f]{40}$ ]] || fail "${label}: '${subject}' trailers: ${trailers}"
+    else
+      [[ -z "${trailers}" ]] || fail "${label}: '${subject}' has trailers: ${trailers}"
+    fi
+    [[ "$(git -C "${FAKE_ORIGIN}" log -1 --format=%an "${sha}")" == jcmx9 ]] || fail "${label}: '${subject}' author"
+  done < <(git -C "${FAKE_ORIGIN}" log --format=$'%H\t%s' main dev)
+  pass "${label}: script commits have no Co-authored-by/Signed-off-by, only Release-Source"
 }
 
 pkg_version() {
@@ -370,10 +416,8 @@ run_release prod >"${tmp}/out.txt" 2>&1 || { cat "${tmp}/out.txt"; fail "prod (c
 expect_released "prod cycle 2" "26.10.1" "26.10.2-dev.0"
 git -C "${FAKE_ORIGIN}" show main:c.txt >/dev/null 2>&1 || fail "prod cycle 2: feature c missing on main"
 pass "prod cycle 2: new feature reached main"
-expect_eq "prod cycle 2: earlier dev commits are not replayed onto main" \
-  "$(git -C "${FAKE_ORIGIN}" log --format=%s main | grep -c '^release: 26.10.0-dev.1$')" "1"
-expect_eq "prod cycle 2: feature b once on main" \
-  "$(git -C "${FAKE_ORIGIN}" log --format=%s main | grep -c '^feat: b.txt$')" "1"
+expect_eq "prod cycle 2: one snapshot commit per release on main" \
+  "$(git -C "${FAKE_ORIGIN}" log --format=%s main | tr '\n' '|')" "release: 26.10.1|release: 26.10.0|init|"
 git -C "${FAKE_ORIGIN}" show main:CHANGELOG.md | grep -qx '## \[26.10.1\] - 2026-10-15' || fail "cycle 2 CHANGELOG not rolled"
 pass "prod cycle 2: CHANGELOG rolled"
 
@@ -381,6 +425,26 @@ pass "prod cycle 2: CHANGELOG rolled"
 dev_commit d.txt "feature d"
 RFW_NOW=26.11 run_release prod --new-month >"${tmp}/out.txt" 2>&1 || { cat "${tmp}/out.txt"; fail "prod --new-month (cycle 3) failed"; }
 expect_released "prod cycle 3 (--new-month)" "26.11.0" "26.11.1-dev.0"
+expect_eq "prod cycle 3: main holds only release commits" \
+  "$(git -C "${FAKE_ORIGIN}" rev-list --count main)" "4"
+expect_plain_script_commits "3 prod cycles"
+
+# 3b2. a stale release branch (dev moved after failed checks) is not reused --------
+setup_repo
+touch "${FAKE_STATE}/fail-release_26.10.0"
+run_code prod
+expect_eq "stale branch: failed checks exit code" "${code}" "9"
+rm "${FAKE_STATE}/fail-release_26.10.0"
+dev_commit fix.txt "the fix"
+run_code prod
+expect_eq "stale branch: rerun stops (exit code)" "${code}" "9"
+grep -q "git push origin --delete release/26.10.0 && scripts/release.sh prod" "${tmp}/out.txt" ||
+  fail "stale branch: no delete/rebuild command: $(cat "${tmp}/out.txt")"
+pass "stale branch: rerun names the delete/rebuild command"
+git -C "${work}" push -q origin --delete release/26.10.0
+run_release prod >"${tmp}/out.txt" 2>&1 || { cat "${tmp}/out.txt"; fail "rebuilt release failed"; }
+expect_released "stale branch rebuilt" "26.10.0" "26.10.1-dev.0"
+expect_eq "stale branch rebuilt: the fix is released" "$(git -C "${FAKE_ORIGIN}" show main:fix.txt)" "the fix"
 
 # 3b. resume after failed release checks ------------------------------------
 setup_repo
@@ -394,7 +458,7 @@ if git -C "${FAKE_ORIGIN}" rev-parse -q --verify refs/tags/v26.10.0 >/dev/null; 
 pass "resume: no tag after failed checks"
 rm "${FAKE_STATE}/fail-release_26.10.0"
 run_release prod >"${tmp}/out.txt" 2>&1 || { cat "${tmp}/out.txt"; fail "resumed prod failed"; }
-grep -q "origin/release/26.10.0 existiert bereits und wird weiterverwendet" "${tmp}/out.txt" || fail "resume did not report the existing branch"
+grep -q "origin/release/26.10.0 existiert bereits (Stand origin/dev) und wird weiterverwendet" "${tmp}/out.txt" || fail "resume did not report the existing branch"
 grep -q "PR release/26.10.0 -> main existiert bereits" "${tmp}/out.txt" || fail "resume did not report the open PR"
 pass "resume: existing branch and PR are reused"
 expect_released "resume (release checks)" "26.10.0" "26.10.1-dev.0"
@@ -439,6 +503,56 @@ expect_eq "back-merge conflict: no local back-merge branch" \
 [[ ! -f "${work}/.git/MERGE_HEAD" ]] || fail "merge left in progress"
 expect_local_clean_dev "back-merge conflict"
 
+# N1 case A: the documented manual back-merge, then the next release is clean.
+git -C "${work}" pull -q --ff-only origin dev
+git -C "${work}" checkout -q -b chore/back-merge-26.10.0 origin/dev
+git -C "${work}" merge -q --no-ff origin/main >/dev/null 2>&1 || true
+echo resolved >"${work}/a.txt"
+(cd "${work}" && PATH="${fakebin}:${PATH}" npm version 26.10.1-dev.0 --no-git-tag-version --allow-same-version)
+git -C "${work}" add -A
+git -C "${work}" commit -q --no-edit
+git -C "${work}" checkout -q dev
+git -C "${work}" merge -q --no-ff --no-edit chore/back-merge-26.10.0
+git -C "${work}" branch -q -D chore/back-merge-26.10.0
+git -C "${work}" push -q origin dev
+dev_commit e.txt "feature e"
+run_release prod >"${tmp}/out.txt" 2>&1 || { cat "${tmp}/out.txt"; fail "N1 A: release after manual back-merge failed"; }
+expect_released "N1 A (after manual back-merge)" "26.10.1" "26.10.2-dev.0"
+expect_eq "N1 A: resolution is on main" "$(git -C "${FAKE_ORIGIN}" show main:a.txt)" "resolved"
+
+# N1 case B: a hotfix committed to main and, separately, to dev.
+setup_repo
+run_release prod >/dev/null 2>&1 || fail "N1 B: first release failed"
+dev_commit a.txt "dev"
+main_hotfix a.txt "hotfix"
+dev_commit a.txt "hotfix"
+run_release prod >"${tmp}/out.txt" 2>&1 || { cat "${tmp}/out.txt"; fail "N1 B: release after hotfix in main and dev failed"; }
+expect_released "N1 B (hotfix in main and dev)" "26.10.1" "26.10.2-dev.0"
+expect_eq "N1 B: hotfix on main" "$(git -C "${FAKE_ORIGIN}" show main:a.txt)" "hotfix"
+
+# N1 case B2: a hotfix only on main stops the release (exit 10, nothing pushed); after
+# merging main into dev as the message says, it releases cleanly.
+setup_repo
+run_release prod >/dev/null 2>&1 || fail "N1 B2: first release failed"
+dev_commit a.txt "dev"
+main_hotfix a.txt "hotfix"
+main_before="$(git -C "${FAKE_ORIGIN}" rev-parse main)"
+run_code prod
+expect_eq "N1 B2: main not in dev (exit code)" "${code}" "10"
+grep -q "origin/main enthält Änderungen, die nicht in origin/dev sind" "${tmp}/out.txt" || fail "N1 B2: message: $(cat "${tmp}/out.txt")"
+expect_eq "N1 B2: main untouched" "$(git -C "${FAKE_ORIGIN}" rev-parse main)" "${main_before}"
+expect_eq "N1 B2: no release branch pushed" "$(git -C "${FAKE_ORIGIN}" for-each-ref --format=x refs/heads/release/)" ""
+expect_local_clean_dev "N1 B2 abort"
+git -C "${work}" fetch -q origin
+git -C "${work}" merge -q --no-ff origin/main >/dev/null 2>&1 || true
+echo merged >"${work}/a.txt"
+git -C "${work}" add -A
+git -C "${work}" commit -q --no-edit
+git -C "${work}" push -q origin dev
+run_release prod >"${tmp}/out.txt" 2>&1 || { cat "${tmp}/out.txt"; fail "N1 B2: release after merging main into dev failed"; }
+expect_released "N1 B2 (main merged into dev)" "26.10.1" "26.10.2-dev.0"
+expect_eq "N1 B2: merged content on main" "$(git -C "${FAKE_ORIGIN}" show main:a.txt)" "merged"
+
 # 3f. a wrong version on main aborts before tagging --------------------------
 setup_repo
 FAKE_MERGE_NOOP=1 run_code prod
@@ -473,5 +587,13 @@ grep -q "v26.10.0-dev.1 ist lokal fertig" "${tmp}/out.txt" || fail "dev resume n
 expect_eq "dev resume: version not bumped twice" "$(pkg_version "${FAKE_ORIGIN}" dev)" "26.10.0-dev.1"
 git -C "${FAKE_ORIGIN}" rev-parse -q --verify refs/tags/v26.10.0-dev.1 >/dev/null || fail "dev resume: tag missing"
 pass "dev resume: commit and tag pushed"
+
+# --- 4. release notes from CHANGELOG.md --------------------------------------
+notes="${root}/scripts/release-notes.sh"
+printf '# Changelog\n\n## [Unreleased]\n\n### Fixed\n- next\n\n## [26.10.0] - 2026-10-15\n\n### Added\n- a\n- b\n\n## [25.1.0] - 2025-01-01\n\n- old\n' >"${tmp}/CHANGELOG.md"
+expect_eq "notes: release section" "$("${notes}" 26.10.0 "${tmp}/CHANGELOG.md")" $'### Added\n- a\n- b'
+expect_eq "notes: pre-release uses [Unreleased]" "$("${notes}" 26.10.1-dev.3 "${tmp}/CHANGELOG.md")" $'### Fixed\n- next'
+expect_eq "notes: last section" "$("${notes}" 25.1.0 "${tmp}/CHANGELOG.md")" "- old"
+expect_eq "notes: missing section" "$("${notes}" 9.9.9 "${tmp}/CHANGELOG.md")" "Release 9.9.9"
 
 echo "All release tests passed."

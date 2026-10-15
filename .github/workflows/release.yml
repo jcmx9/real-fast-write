@@ -67,6 +67,14 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Notes from CHANGELOG.md instead of GitHub's generated notes (no author/contributor lists).
+      - name: Release notes from CHANGELOG.md
+        env:
+          TAG: ${{ github.ref_name }}
+        run: scripts/release-notes.sh "${TAG#v}" CHANGELOG.md > release-notes.md
+
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: dist-*
@@ -86,7 +94,7 @@ jobs:
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           prerelease: ${{ contains(github.ref_name, '-dev.') }}
-          generate_release_notes: true
+          body_path: release-notes.md
           files: |
             release/*.zip
             release/*.AppImage

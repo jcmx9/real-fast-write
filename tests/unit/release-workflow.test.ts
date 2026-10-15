@@ -95,12 +95,25 @@ describe('release workflow', () => {
     const rel = find('publish', (s) => !!s.uses?.startsWith('softprops/action-gh-release@'))
     // biome-ignore lint/suspicious/noTemplateCurlyInString: literal GitHub Actions expression
     expect(rel.with?.prerelease).toBe("${{ contains(github.ref_name, '-dev.') }}")
-    expect(rel.with?.generate_release_notes).toBe(true)
+    expect(rel.with?.generate_release_notes).toBeUndefined()
+    expect(rel.with?.body_path).toBe('release-notes.md')
     expect(String(rel.with?.files).split('\n').filter(Boolean)).toEqual([
       'release/*.zip',
       'release/*.AppImage',
       'release/SHA256SUMS',
     ])
+  })
+
+  it('takes the release notes from CHANGELOG.md, never from GitHub (no author lists)', () => {
+    expect(text).not.toContain('generate_release_notes')
+    const notes = find('publish', (s) => !!s.run?.includes('scripts/release-notes.sh'))
+    expect(notes.run).toContain('> release-notes.md')
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: literal GitHub Actions expression
+    expect(notes.env?.TAG).toBe('${{ github.ref_name }}')
+    const steps = job('publish').steps
+    const checkout = steps.findIndex((s) => !!s.uses?.startsWith('actions/checkout@'))
+    expect(checkout).toBeGreaterThanOrEqual(0)
+    expect(checkout).toBeLessThan(steps.indexOf(notes))
   })
 
   it('grants contents: write only to the publish job', () => {
