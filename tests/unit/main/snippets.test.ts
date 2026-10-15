@@ -42,4 +42,9 @@ describe('loadUserSnippets', () => {
     const d = await dir({ 'b.tpl.md': Buffer.from('﻿hi', 'utf8') })
     expect((await loadUserSnippets(d))[0]?.body).toBe('hi')
   })
+
+  it('normalizes NFD file names to NFC', async () => {
+    const d = await dir({ [`${'A\u0308'}rger.tpl.md`]: 'x' })
+    expect((await loadUserSnippets(d)).map((s) => s.name)).toEqual(['\u00C4rger'])
+  })
 })
