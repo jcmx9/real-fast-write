@@ -1,11 +1,15 @@
 import './styles.css'
+import './theme.css'
 import { App } from './app'
+import { supportsGermanHyphenation } from './ui/hyphenation'
 
 function byId(id: string): HTMLElement {
   const el = document.getElementById(id)
   if (!el) throw new Error(`#${id} fehlt in index.html`)
   return el
 }
+
+if (supportsGermanHyphenation(document)) document.documentElement.classList.add('rf-justify')
 
 const app = new App({
   tabbar: byId('tabbar'),
