@@ -9,6 +9,7 @@ import {
 } from '@codemirror/state'
 import { Decoration, type DecorationSet, EditorView, WidgetType } from '@codemirror/view'
 import { frontmatterRange } from './frontmatter'
+import { presentMode } from './mode'
 import { renderTitleBlock, type TitleBlock, titleBlockData } from './titleblock'
 
 export const setHeaderHidden = StateEffect.define<boolean>()
@@ -22,28 +23,34 @@ export const headerHidden = StateField.define<boolean>({
 })
 
 class TitleBlockWidget extends WidgetType {
-  constructor(readonly data: TitleBlock | null) {
+  constructor(
+    readonly data: TitleBlock | null,
+    readonly present: boolean,
+  ) {
     super()
   }
   override eq(other: TitleBlockWidget): boolean {
-    return JSON.stringify(other.data) === JSON.stringify(this.data)
+    return (
+      other.present === this.present && JSON.stringify(other.data) === JSON.stringify(this.data)
+    )
   }
   override toDOM(): HTMLElement {
-    return renderTitleBlock(this.data)
+    return renderTitleBlock(this.data, document, this.present ? 'none' : 'marker')
   }
 }
 
 function build(state: EditorState): DecorationSet {
-  if (!state.field(headerHidden, false)) return Decoration.none
+  const present = state.facet(presentMode)
+  if (!present && !state.field(headerHidden, false)) return Decoration.none
   const range = frontmatterRange(state.doc)
   if (!range) return Decoration.none
-  // A selection on the header (e.g. one just retyped while hidden) keeps it visible.
-  if (state.selection.ranges.some((r) => r.from <= range.to && r.to >= range.from)) {
+  // Outside Present, a selection on the header (e.g. just retyped) keeps it visible.
+  if (!present && state.selection.ranges.some((r) => r.from <= range.to && r.to >= range.from)) {
     return Decoration.none
   }
   return Decoration.set([
     Decoration.replace({
-      widget: new TitleBlockWidget(titleBlockData(state.doc)),
+      widget: new TitleBlockWidget(titleBlockData(state.doc), present),
       block: true,
       rf: 'header-fold',
     }).range(range.from, range.to),
@@ -88,7 +95,8 @@ export const headerFold: StateField<DecorationSet> = StateField.define<Decoratio
   create: build,
   update(deco, tr) {
     const flipped = tr.startState.field(headerHidden, false) !== tr.state.field(headerHidden, false)
-    return tr.docChanged || tr.selection || flipped ? build(tr.state) : deco
+    const modeFlipped = tr.startState.facet(presentMode) !== tr.state.facet(presentMode)
+    return tr.docChanged || tr.selection || flipped || modeFlipped ? build(tr.state) : deco
   },
   provide: (f) => [
     EditorView.decorations.from(f),
@@ -98,15 +106,19 @@ export const headerFold: StateField<DecorationSet> = StateField.define<Decoratio
   ],
 })
 
-export function headerToggleSpec(state: EditorState, hide: boolean): TransactionSpec {
-  const effects = setHeaderHidden.of(hide)
-  const range = hide ? frontmatterRange(state.doc) : null
-  if (!range) return { effects }
+/** Selection-only spec: a cursor inside the front matter moves to the line after it. */
+export function moveOutOfHeader(state: EditorState): TransactionSpec {
+  const range = frontmatterRange(state.doc)
+  if (!range) return {}
   const inside = state.selection.ranges.some((r) => r.from <= range.to && r.to >= range.from)
-  if (!inside) return { effects }
+  if (!inside) return {}
   return {
-    effects,
     selection: EditorSelection.cursor(Math.min(range.to + 1, state.doc.length)),
     scrollIntoView: true,
   }
+}
+
+export function headerToggleSpec(state: EditorState, hide: boolean): TransactionSpec {
+  const effects = setHeaderHidden.of(hide)
+  return hide ? { ...moveOutOfHeader(state), effects } : { effects }
 }

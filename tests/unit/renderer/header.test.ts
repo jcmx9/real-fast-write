@@ -9,7 +9,13 @@ import {
 import { EditorState } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import { describe, expect, it } from 'vitest'
-import { headerFold, headerHidden, headerToggleSpec } from '../../../src/renderer/editor/header'
+import {
+  headerFold,
+  headerHidden,
+  headerToggleSpec,
+  moveOutOfHeader,
+} from '../../../src/renderer/editor/header'
+import { modeCompartment, modeExtensions } from '../../../src/renderer/editor/mode'
 import { createState, viewCompartment, viewExtensions } from '../../../src/renderer/editor/setup'
 
 const DOC = '---\ntitle: "Kickoff"\n---\n\n# Body'
@@ -166,5 +172,63 @@ describe('collapsed header in a real view', () => {
       selection: { anchor: 14 },
     }).state
     expect(collapsed(away)).toEqual(['header-fold@0-12'])
+  })
+})
+
+function makePresent(doc: string, cursor: number, hidden = false) {
+  return EditorState.create({
+    doc,
+    selection: { anchor: cursor },
+    extensions: [
+      headerHidden.init(() => hidden),
+      headerFold,
+      modeCompartment.of(modeExtensions('present')),
+    ],
+  })
+}
+
+describe('Present', () => {
+  it('collapses the header even when the per-tab toggle is off', () => {
+    expect(collapsed(makePresent(DOC, DOC.length))).toEqual([`header-fold@0-${END}`])
+  })
+  it('collapses even while the selection touches it, and clamps the selection out', () => {
+    const s = makePresent(DOC, DOC.length)
+    const next = s.update({ selection: { anchor: 2 } }).state
+    expect(collapsed(next)).toEqual([`header-fold@0-${END}`])
+    expect(next.selection.main.head).toBe(END + 1)
+  })
+  it('is read-only in Present', () => {
+    const s = makePresent(DOC, DOC.length)
+    const next = s.update({ changes: { from: 4, insert: 'x' } }).state
+    expect(next.doc.toString()).toBe(DOC)
+  })
+  it('leaving Present restores the per-tab toggle', () => {
+    const s = makePresent(DOC, DOC.length, false)
+    const edit = s.update({ effects: modeCompartment.reconfigure(modeExtensions('edit')) }).state
+    expect(collapsed(edit)).toEqual([])
+    const hidden = makePresent(DOC, DOC.length, true)
+    const edit2 = hidden.update({
+      effects: modeCompartment.reconfigure(modeExtensions('edit')),
+    }).state
+    expect(collapsed(edit2)).toEqual([`header-fold@0-${END}`])
+  })
+  it('a note without title fields shows nothing in Present', () => {
+    const doc = '---\ntoc: false\n---\n\n# Body'
+    const s = makePresent(doc, doc.length)
+    let dom: HTMLElement | null = null
+    s.field(headerFold).between(0, doc.length, (_f, _t, d) => {
+      dom = (d.spec.widget as { toDOM(): HTMLElement }).toDOM()
+    })
+    expect((dom as HTMLElement | null)?.classList.contains('rf-titleblock-none')).toBe(true)
+    expect((dom as HTMLElement | null)?.textContent).toBe('')
+  })
+})
+
+describe('moveOutOfHeader', () => {
+  it('moves a cursor inside the front matter after it, else does nothing', () => {
+    const inside = EditorState.create({ doc: DOC, selection: { anchor: 5 } })
+    expect(inside.update(moveOutOfHeader(inside)).state.selection.main.head).toBe(END + 1)
+    const outside = EditorState.create({ doc: DOC, selection: { anchor: DOC.length } })
+    expect(moveOutOfHeader(outside)).toEqual({})
   })
 })
