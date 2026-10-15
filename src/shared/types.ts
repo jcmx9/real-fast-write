@@ -11,6 +11,12 @@ export interface NoteFile {
   hash: string
 }
 
+/** What the watcher reports for an open note that changed on disk. */
+export type ExternalChange =
+  | { kind: 'changed'; note: NoteFile }
+  | { kind: 'unreadable'; path: string; reason: 'encoding' | 'error'; message: string }
+  | { kind: 'deleted'; path: string }
+
 export interface Settings {
   defaultFolder: string
   snippetFolder: string
@@ -100,7 +106,7 @@ export interface RfwApi {
   confirmDiscard(names: string[]): Promise<boolean>
   onMenu(cb: (cmd: MenuCommand) => void): void
   onOpenPaths(cb: (paths: string[]) => void): void
-  onExternalChange(cb: (note: NoteFile) => void): void
+  onExternalChange(cb: (change: ExternalChange) => void): void
   /** cb resolves true when the window may close. */
   onBeforeClose(cb: () => Promise<boolean>): void
   /** Resolves to whether the user (not the app) had the window fullscreen before the change. */

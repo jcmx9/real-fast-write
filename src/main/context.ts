@@ -42,7 +42,7 @@ export class AppContext {
   session: Session = DEFAULT_SESSION
   fonts: FontStatus = { dir: '', found: false, missing: [] }
   readonly reserved = new Set<string>()
-  readonly watcher = new NoteWatcher((note) => this.send(Ch.externalChange, note))
+  readonly watcher = new NoteWatcher((change) => this.send(Ch.externalChange, change))
   /** Paths the renderer may read or write: only ones the user opened or rf-write created. */
   private readonly allowed = new Set<string>()
   private readonly pending: string[] = []

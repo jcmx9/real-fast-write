@@ -1,16 +1,24 @@
-import { type FSWatcher, readFileSync, watch } from 'node:fs'
+import { type FSWatcher, promises as fs, readFileSync, watch } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
-import type { NoteFile } from '../shared/types'
-import { hashBytes, readNote } from './files'
+import type { ExternalChange, NoteFile } from '../shared/types'
+import { decodeNote, errorCode, hashBytes, NotUtf8Error } from './files'
+
+interface Known {
+  /** Hashes of content that is not reported (own writes, the baseline, reported content). */
+  accepted: Set<string>
+  latest: string
+  /** Set while the file is reported as deleted or unreadable; a later readable state is reported. */
+  failure?: 'deleted' | 'error'
+}
 
 export class NoteWatcher {
   private readonly dirs = new Map<string, FSWatcher>()
   private files = new Set<string>()
-  private readonly known = new Map<string, { accepted: Set<string>; latest: string }>()
+  private readonly known = new Map<string, Known>()
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>()
 
   constructor(
-    private readonly onChange: (note: NoteFile) => void,
+    private readonly onChange: (change: ExternalChange) => void,
     private readonly debounceMs = 200,
   ) {}
 
@@ -65,6 +73,8 @@ export class NoteWatcher {
     if (entry) {
       entry.accepted.add(hash)
       entry.latest = hash
+      // Our own write replaces whatever made the file missing or unreadable.
+      entry.failure = undefined
     } else {
       this.known.set(path, { accepted: new Set([hash]), latest: hash })
     }
@@ -79,35 +89,83 @@ export class NoteWatcher {
 
   private ping(path: string): void {
     if (!this.files.has(path) || basename(path).startsWith('.')) return
+    this.schedule(path, false)
+  }
+
+  private schedule(path: string, confirmMissing: boolean): void {
     const pending = this.timers.get(path)
     if (pending) clearTimeout(pending)
     this.timers.set(
       path,
       setTimeout(() => {
         this.timers.delete(path)
-        void this.check(path)
+        void this.check(path, confirmMissing)
       }, this.debounceMs),
     )
   }
 
-  private async check(path: string): Promise<void> {
+  /** confirmMissing: the previous check already found the file missing. */
+  private async check(path: string, confirmMissing = false): Promise<void> {
     if (!this.files.has(path)) return
+    let bytes: Buffer
+    try {
+      bytes = await fs.readFile(path)
+    } catch (err) {
+      // The path may have been removed while the read was in flight.
+      if (this.files.has(path)) this.readFailed(path, err, confirmMissing)
+      return
+    }
+    if (!this.files.has(path)) return
+    const hash = hashBytes(bytes)
+    const entry = this.known.get(path)
+    if (!entry?.failure) {
+      if (entry?.latest === hash) {
+        // Settled on our newest write: only that content is accepted from now on.
+        entry.accepted = new Set([hash])
+        return
+      }
+      if (entry?.accepted.has(hash)) return
+    }
+    // Accept these bytes before decoding, so the same bytes are reported only once.
+    this.known.set(path, { accepted: new Set([hash]), latest: hash })
     let note: NoteFile
     try {
-      note = await readNote(path)
-    } catch {
+      note = decodeNote(path, bytes)
+    } catch (err) {
+      if (err instanceof NotUtf8Error) {
+        this.onChange({ kind: 'unreadable', path, reason: 'encoding', message: err.message })
+      }
       return
     }
-    // The path may have been removed while the read was in flight.
-    if (!this.files.has(path)) return
+    this.onChange({ kind: 'changed', note })
+  }
+
+  private readFailed(path: string, err: unknown, confirmMissing: boolean): void {
     const entry = this.known.get(path)
-    if (entry?.latest === note.hash) {
-      // Settled on our newest write: only that content is accepted from now on.
-      entry.accepted = new Set([note.hash])
+    if (errorCode(err) === 'ENOENT') {
+      if (entry?.failure === 'deleted') return
+      // A replace by delete + create (or a rename in flight) looks missing for a moment: check
+      // once more after the debounce before calling it deleted.
+      if (!confirmMissing) {
+        this.schedule(path, true)
+        return
+      }
+      // Nothing is accepted any more: a later file at this path is reported, unless it is ours.
+      this.known.set(path, { accepted: new Set(), latest: '', failure: 'deleted' })
+      this.onChange({ kind: 'deleted', path })
       return
     }
-    if (entry?.accepted.has(note.hash)) return
-    this.known.set(path, { accepted: new Set([note.hash]), latest: note.hash })
-    this.onChange(note)
+    if (entry?.failure === 'error') return
+    this.known.set(path, {
+      accepted: entry?.accepted ?? new Set(),
+      latest: entry?.latest ?? '',
+      failure: 'error',
+    })
+    this.onChange({
+      kind: 'unreadable',
+      path,
+      reason: 'error',
+      message: err instanceof Error ? err.message : String(err),
+    })
   }
 }

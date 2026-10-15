@@ -3,7 +3,14 @@ import { redo, selectAll, undo } from '@codemirror/commands'
 import { foldCode, unfoldAll, unfoldCode } from '@codemirror/language'
 import type { EditorState, TransactionSpec } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
-import type { ExportResult, MenuCommand, Mode, NoteFile, View } from '../shared/types'
+import type {
+  ExportResult,
+  ExternalChange,
+  MenuCommand,
+  Mode,
+  NoteFile,
+  View,
+} from '../shared/types'
 import { AutosaveScheduler } from './editor/autosave'
 import { headerHidden, headerToggleSpec, moveOutOfHeader } from './editor/header'
 import { modeCompartment, modeExtensions } from './editor/mode'
@@ -33,6 +40,8 @@ const INSTALL_HINT = [
 ].join('\n')
 
 const CONFLICT_ERROR = 'Externe Änderung – bitte im Hinweis entscheiden'
+const UNREADABLE_ERROR = 'Externe Fassung nicht lesbar – bitte im Hinweis entscheiden'
+const DELETED_ERROR = 'Datei außerhalb gelöscht – bitte im Hinweis entscheiden'
 
 const MAX_SAVE_ROUNDS = 3
 
@@ -72,7 +81,10 @@ export class App {
   private readonly fullScreenOps = new SerialQueue()
   private shownId: number | null = null
   private readonly saveErrors = new Map<number, string>()
+  /** Tabs held after an external change: no saving until the user answers the banner. */
   private readonly conflicts = new Set<number>()
+  /** Tabs whose content is not on disk although clean (file deleted or made unreadable outside). */
+  private readonly unwritten = new Set<number>()
   private readonly saving = new Map<number, Promise<boolean>>()
   private sessionTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -123,7 +135,7 @@ export class App {
       ?.addEventListener('click', () => void this.open())
     this.rfw.onMenu((cmd) => void this.command(cmd))
     this.rfw.onOpenPaths((paths) => void this.openPaths(paths))
-    this.rfw.onExternalChange((note) => this.externalChange(note))
+    this.rfw.onExternalChange((change) => this.externalChange(change))
     this.rfw.onBeforeClose(() => this.beforeClose())
     window.addEventListener('keydown', (e) => this.globalKeys(e))
     window.addEventListener('blur', () => void this.autosave.flush())
@@ -453,16 +465,19 @@ export class App {
     this.outline.refresh()
   }
 
-  private async closeTab(id: number): Promise<void> {
+  /** discard: the user already chose to drop unsaved content (no save, no prompt). */
+  private async closeTab(id: number, discard = false): Promise<void> {
     const tab = this.store.get(id)
     if (!tab) return
-    let saved = true
-    for (let i = 0; i < MAX_SAVE_ROUNDS && this.store.isDirty(tab); i++) {
-      saved = await this.saveTab(tab)
-      if (!saved) break
-    }
-    if (!saved || this.store.isDirty(tab)) {
-      if (!(await this.rfw.confirmDiscard([fileName(tab.path)]))) return
+    if (!discard) {
+      let saved = true
+      for (let i = 0; i < MAX_SAVE_ROUNDS && this.unsaved(tab); i++) {
+        saved = await this.saveTab(tab)
+        if (!saved) break
+      }
+      if (!saved || this.unsaved(tab)) {
+        if (!(await this.rfw.confirmDiscard([fileName(tab.path)]))) return
+      }
     }
     if (!tab.onDisk) {
       try {
@@ -475,6 +490,7 @@ export class App {
     this.notices.dismiss(tab.path)
     this.saveErrors.delete(id)
     this.conflicts.delete(id)
+    this.unwritten.delete(id)
     this.saving.delete(id)
     // Present never shows the empty state.
     if (this.mode === 'present' && this.store.all.length === 0) await this.exitPresent()
@@ -562,9 +578,9 @@ export class App {
   }
 
   private async writeTab(tab: Tab, force: boolean): Promise<boolean> {
-    if (!this.store.isDirty(tab) && (tab.onDisk || !force)) return true
+    if (!this.unsaved(tab) && (tab.onDisk || !force)) return true
     if (this.conflicts.has(tab.id)) {
-      this.saveErrors.set(tab.id, CONFLICT_ERROR)
+      if (!this.saveErrors.has(tab.id)) this.saveErrors.set(tab.id, CONFLICT_ERROR)
       this.refresh()
       return false
     }
@@ -582,6 +598,7 @@ export class App {
     }
     const firstSave = !tab.onDisk
     this.store.markSaved(tab.id, doc)
+    this.unwritten.delete(tab.id)
     this.saveErrors.delete(tab.id)
     if (firstSave) this.syncMain()
     this.refresh()
@@ -599,7 +616,7 @@ export class App {
   private async beforeClose(): Promise<boolean> {
     let saved = await this.autosave.flush()
     // Typing during the save leaves the tab dirty again: save again (bounded).
-    for (let i = 0; i < MAX_SAVE_ROUNDS && this.store.all.some((t) => this.store.isDirty(t)); i++) {
+    for (let i = 0; i < MAX_SAVE_ROUNDS && this.store.all.some((t) => this.unsaved(t)); i++) {
       saved = await this.saveAll()
       if (!saved) break
     }
@@ -610,16 +627,29 @@ export class App {
       console.error('persistSession failed', e)
     }
     if (saved) return true
-    const names = this.store.all.filter((t) => this.store.isDirty(t)).map((t) => fileName(t.path))
+    const names = this.store.all.filter((t) => this.unsaved(t)).map((t) => fileName(t.path))
     return this.rfw.confirmDiscard(names)
   }
 
   // ── external changes ────────────────────────────────────────────────────
 
-  private externalChange(note: NoteFile): void {
+  /** Dirty, or clean but its content is no longer on disk. */
+  private unsaved(tab: Tab): boolean {
+    return this.store.isDirty(tab) || this.unwritten.has(tab.id)
+  }
+
+  private externalChange(change: ExternalChange): void {
+    if (change.kind !== 'changed') {
+      this.holdUnloadable(change)
+      return
+    }
+    const note = change.note
     const tab = this.store.findByPath(note.path)
     if (!tab) return
+    // Readable content is back on disk: the normal conflict/reload logic replaces any hold.
+    this.unwritten.delete(tab.id)
     if (!this.store.isDirty(tab)) {
+      this.notices.dismiss(note.path)
       this.clearConflict(tab.id)
       this.reload(tab, note)
       return
@@ -644,6 +674,44 @@ export class App {
         },
       ],
       note.path,
+    )
+  }
+
+  /** Holds the tab like a conflict, dirty or not: autosave must not write over this state. */
+  private holdUnloadable(change: Exclude<ExternalChange, { kind: 'changed' }>): void {
+    const tab = this.store.findByPath(change.path)
+    if (!tab) return
+    const name = fileName(change.path)
+    let message: string
+    let saveLabel: string
+    if (change.kind === 'deleted') {
+      message = `„${name}“ wurde außerhalb gelöscht.`
+      saveLabel = 'Erneut speichern'
+    } else {
+      message =
+        change.reason === 'encoding'
+          ? `„${name}“ wurde außerhalb geändert und ist kein gültiges UTF-8. rf-write speichert nicht darüber.`
+          : `„${name}“ wurde außerhalb geändert und kann nicht gelesen werden (${change.message}). rf-write speichert nicht darüber.`
+      saveLabel = 'Meine Fassung speichern (überschreiben)'
+    }
+    this.conflicts.add(tab.id)
+    this.unwritten.add(tab.id)
+    this.saveErrors.set(tab.id, change.kind === 'deleted' ? DELETED_ERROR : UNREADABLE_ERROR)
+    this.refresh()
+    this.notices.banner(
+      message,
+      [
+        {
+          label: saveLabel,
+          run: () => {
+            this.clearConflict(tab.id)
+            this.refresh()
+            void this.saveTab(tab)
+          },
+        },
+        { label: 'Tab schließen', run: () => void this.closeTab(tab.id, true) },
+      ],
+      change.path,
     )
   }
 
@@ -672,6 +740,7 @@ export class App {
     )
     tab.bom = note.bom
     tab.eol = note.eol
+    this.unwritten.delete(tab.id)
     this.store.updateState(tab.id, state)
     this.store.markSaved(tab.id, state.doc)
     if (this.shownId === tab.id) {

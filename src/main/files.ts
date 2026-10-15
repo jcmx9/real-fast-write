@@ -102,7 +102,11 @@ export function noteBytes(text: string, bom: boolean): Buffer {
 }
 
 export async function readNote(path: string): Promise<NoteFile> {
-  const bytes = await fs.readFile(path)
+  return decodeNote(path, await fs.readFile(path))
+}
+
+/** Decodes bytes read from `path`; throws `NotUtf8Error` for invalid UTF-8. */
+export function decodeNote(path: string, bytes: Uint8Array): NoteFile {
   let raw: string
   try {
     raw = decoder.decode(bytes)

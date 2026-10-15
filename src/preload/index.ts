@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { Ch } from '../shared/ipc'
-import type { MenuCommand, NoteFile, RfwApi } from '../shared/types'
+import type { ExternalChange, MenuCommand, RfwApi } from '../shared/types'
 
 const api: RfwApi = {
   startup: () => ipcRenderer.invoke(Ch.startup),
@@ -21,7 +21,7 @@ const api: RfwApi = {
     ipcRenderer.on(Ch.openPaths, (_e, paths: string[]) => cb(paths))
   },
   onExternalChange: (cb) => {
-    ipcRenderer.on(Ch.externalChange, (_e, note: NoteFile) => cb(note))
+    ipcRenderer.on(Ch.externalChange, (_e, change: ExternalChange) => cb(change))
   },
   setFullScreen: (on) => ipcRenderer.invoke(Ch.setFullScreen, on),
   listSnippets: () => ipcRenderer.invoke(Ch.listSnippets),

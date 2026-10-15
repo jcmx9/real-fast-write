@@ -1,13 +1,14 @@
-import { mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { hashBytes, noteBytes, writeNote } from '../../../src/main/files'
 import { NoteWatcher } from '../../../src/main/watcher'
-import type { NoteFile } from '../../../src/shared/types'
+import type { ExternalChange, NoteFile } from '../../../src/shared/types'
 
 let dir: string
 let changes: NoteFile[]
+let events: ExternalChange[]
 let watcher: NoteWatcher
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -22,7 +23,11 @@ async function waitFor(check: () => boolean, ms = 4000): Promise<void> {
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'rfw-watch-'))
   changes = []
-  watcher = new NoteWatcher((n) => changes.push(n), 100)
+  events = []
+  watcher = new NoteWatcher((c) => {
+    events.push(c)
+    if (c.kind === 'changed') changes.push(c.note)
+  }, 100)
 })
 afterEach(() => watcher.close())
 
@@ -147,5 +152,89 @@ describe('NoteWatcher', () => {
     await writeFile(path, 'v1')
     await waitFor(() => changes.length > 0)
     expect(changes.at(-1)?.text).toBe('v1')
+  })
+
+  it('reports invalid UTF-8 once per distinct on-disk bytes', async () => {
+    const path = join(dir, 'ansi.md')
+    await writeFile(path, 'gut')
+    watcher.setFiles([path])
+    await sleep(150)
+    const ansi = Buffer.from('Grüße', 'latin1')
+    await writeFile(path, ansi)
+    await waitFor(() => events.length > 0)
+    await sleep(400)
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({ kind: 'unreadable', path, reason: 'encoding' })
+    await writeFile(path, ansi)
+    await sleep(600)
+    expect(events).toHaveLength(1)
+    await writeFile(path, Buffer.from('anders ä', 'latin1'))
+    await waitFor(() => events.length > 1)
+    expect(events[1]).toMatchObject({ kind: 'unreadable', reason: 'encoding' })
+  })
+
+  it('does not report our own save over unreadable bytes', async () => {
+    const path = join(dir, 'ansi2.md')
+    await writeFile(path, 'gut')
+    watcher.setFiles([path])
+    await sleep(150)
+    await writeFile(path, Buffer.from('ä', 'latin1'))
+    await waitFor(() => events.length > 0)
+    watcher.expect(path, hashBytes(noteBytes('meins', false)))
+    await writeNote(path, 'meins', false)
+    await sleep(600)
+    expect(events).toHaveLength(1)
+  })
+
+  it('reports a deletion once and a recreation as a change', async () => {
+    const path = join(dir, 'weg.md')
+    await writeFile(path, 'da')
+    watcher.setFiles([path])
+    await sleep(150)
+    await rm(path)
+    await waitFor(() => events.length > 0)
+    await sleep(600)
+    expect(events).toEqual([{ kind: 'deleted', path }])
+    await writeFile(path, 'wieder da')
+    await waitFor(() => events.length > 1)
+    expect(events[1]).toMatchObject({ kind: 'changed', note: { text: 'wieder da' } })
+  })
+
+  it('reports a recreation with the old content, so a deletion hold is lifted', async () => {
+    const path = join(dir, 'weg2.md')
+    await writeFile(path, 'gleich')
+    watcher.setFiles([path])
+    await sleep(150)
+    await rm(path)
+    await waitFor(() => events.length > 0)
+    await writeFile(path, 'gleich')
+    await waitFor(() => events.length > 1)
+    expect(events[1]).toMatchObject({ kind: 'changed', note: { text: 'gleich' } })
+  })
+
+  it('does not report our own recreation after a deletion', async () => {
+    const path = join(dir, 'weg3.md')
+    await writeFile(path, 'da')
+    watcher.setFiles([path])
+    await sleep(150)
+    await rm(path)
+    await waitFor(() => events.length > 0)
+    watcher.expect(path, hashBytes(noteBytes('neu', false)))
+    await writeNote(path, 'neu', false)
+    await sleep(600)
+    expect(events).toHaveLength(1)
+  })
+
+  it('does not report a delete-and-recreate within the debounce as deleted', async () => {
+    const path = join(dir, 'kurz.md')
+    await writeFile(path, 'a')
+    watcher.setFiles([path])
+    await sleep(150)
+    await rm(path)
+    await sleep(20)
+    await writeFile(path, 'b')
+    await waitFor(() => events.length > 0)
+    await sleep(400)
+    expect(events).toEqual([expect.objectContaining({ kind: 'changed' })])
   })
 })
