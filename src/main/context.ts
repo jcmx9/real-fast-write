@@ -95,6 +95,10 @@ export class AppContext {
       this.window = null
       this.rendererReady = false
     })
+    win.on('leave-full-screen', () => {
+      if (process.platform !== 'darwin') win.setMenuBarVisibility(true)
+      this.send(Ch.fullScreenLeft)
+    })
     this.installMenu()
   }
 

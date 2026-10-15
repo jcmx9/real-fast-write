@@ -66,6 +66,8 @@ export function buildMenuTemplate(d: MenuDeps): MenuItemConstructorOptions[] {
   const view: MenuItemConstructorOptions = {
     label: 'Ansicht',
     submenu: [
+      item('toggle-present', 'Präsentieren ein/aus', 'CmdOrCtrl+Shift+P'),
+      sep,
       item('toggle-view', 'Code-Ansicht ein/aus', 'CmdOrCtrl+Shift+M'),
       item('toggle-header', 'YAML-Header ein/aus', 'CmdOrCtrl+Shift+H'),
       sep,

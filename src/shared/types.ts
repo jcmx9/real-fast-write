@@ -69,6 +69,7 @@ export type MenuCommand =
   | 'undo'
   | 'redo'
   | 'select-all'
+  | 'toggle-present'
   | 'toggle-view'
   | 'toggle-header'
   | 'fold'
@@ -96,4 +97,6 @@ export interface RfwApi {
   onExternalChange(cb: (note: NoteFile) => void): void
   /** cb resolves true when the window may close. */
   onBeforeClose(cb: () => Promise<boolean>): void
+  setFullScreen(on: boolean): Promise<void>
+  onFullScreenLeft(cb: () => void): void
 }

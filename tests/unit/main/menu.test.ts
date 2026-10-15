@@ -34,6 +34,7 @@ describe('buildMenuTemplate', () => {
     ['select-all', 'CmdOrCtrl+A'],
     ['next-tab', 'Ctrl+Tab'],
     ['prev-tab', 'Ctrl+Shift+Tab'],
+    ['toggle-present', 'CmdOrCtrl+Shift+P'],
     ['toggle-view', 'CmdOrCtrl+Shift+M'],
     ['toggle-header', 'CmdOrCtrl+Shift+H'],
     ['fold', 'Cmd+Alt+['],
@@ -95,6 +96,7 @@ describe('buildMenuTemplate', () => {
     const view = buildMenuTemplate(deps()).find((m) => m.label === 'Ansicht')
     const ids = ((view?.submenu ?? []) as { id?: string }[]).map((i) => i.id).filter(Boolean)
     expect(ids).toEqual([
+      'toggle-present',
       'toggle-view',
       'toggle-header',
       'fold',
