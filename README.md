@@ -32,7 +32,7 @@ rf-write --help
 
 Symbolische Links auf einzelne Notizen öffnen die verlinkte Datei (Tab-Name, Umbenennen und Export beziehen sich auf sie); verlinkte Ordner sind davon nicht betroffen.
 
-Der Befehl `rf-write` steht nach der Installation zur Verfügung (ein One-Line-Installer ist geplant); in der Entwicklung startet `npm run dev` die App. Die Einstellungen liegen in `settings.json` im App-Datenordner (macOS `~/Library/Application Support/rf-write`, Windows `%APPDATA%\rf-write`, Linux `~/.config/rf-write`).
+Der Befehl `rf-write` steht nach der Installation zur Verfügung (ein One-Line-Installer ist geplant); in der Entwicklung startet `npm run dev` die App. Die Einstellungen liegen in `settings.json` im App-Datenordner (macOS `~/Library/Application Support/rf-write`, Windows `%APPDATA%\rf-write`, Linux `~/.config/rf-write`); bearbeitet werden sie unter „Einstellungen …“ (macOS Cmd+, im App-Menü, sonst Ctrl+, im Menü „Datei“).
 
 Die Preview nutzt die Schriften von rf-document aus dessen Installationsordner und fällt andernfalls auf Systemschriften zurück. Fließtext wird wie im PDF von rf-document im Blocksatz ohne Silbentrennung gesetzt; getrennt wird erst beim Export durch Typst.
 
@@ -88,6 +88,8 @@ npm test                          # Unit-Tests (Vitest)
 npx vitest run tests/unit/main/files.test.ts   # einzelne Testdatei
 npm run test:e2e                  # Ende-zu-Ende (Playwright + Electron)
 ```
+
+In der Entwicklung (`npm run dev`) nutzt rf-write einen eigenen App-Datenordner `rf-write-dev` neben `rf-write` (z. B. macOS `~/Library/Application Support/rf-write-dev`). So teilen eine installierte App und die Entwicklungsversion nie Einstellungen, Sitzung oder Single-Instance-Sperre. `RFW_USER_DATA` (Tests) überschreibt den Ordner.
 
 ## Projektstruktur
 

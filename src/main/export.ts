@@ -1,4 +1,4 @@
-import { type ChildProcess, spawn } from 'node:child_process'
+import { type ChildProcess, execFile, spawn } from 'node:child_process'
 import { dirname } from 'node:path'
 import type { ExportResult } from '../shared/types'
 
@@ -111,5 +111,42 @@ export function runRfDocument(
         })
       }
     })
+  })
+}
+
+const VERSION_TIMEOUT_MS = 5000
+
+/** The version from `rf-document --version` output: first line, first version-like token. */
+export function parseVersion(output: string): string | null {
+  const first = output
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .find(Boolean)
+  if (!first) return null
+  return /\d+\.\d+(?:\.\d+)?(?:[-+][\w.]+)?/.exec(first)?.[0] ?? first
+}
+
+/**
+ * Runs `rf-document --version` (no shell; a .cmd goes through cmd.exe like the export) for the
+ * settings status. Null when it fails, exits non-zero or does not answer within the timeout.
+ */
+export function rfDocumentVersion(
+  bin: string,
+  opts: { timeoutMs?: number } = {},
+): Promise<string | null> {
+  const { file, args, verbatim } = buildCommand(bin, '--version', process.platform)
+  return new Promise((resolve) => {
+    execFile(
+      file,
+      args,
+      {
+        timeout: opts.timeoutMs ?? VERSION_TIMEOUT_MS,
+        killSignal: 'SIGKILL',
+        windowsHide: true,
+        windowsVerbatimArguments: verbatim,
+        encoding: 'utf8',
+      },
+      (err, stdout) => resolve(err ? null : parseVersion(stdout)),
+    )
   })
 }

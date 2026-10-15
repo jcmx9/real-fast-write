@@ -32,7 +32,7 @@ rf-write --help
 
 Symbolic links to single notes open the linked file (tab name, rename and export refer to it); linked folders are not affected.
 
-The `rf-write` command is available after installation (a one-line installer is planned); in development, `npm run dev` starts the app. Settings live in `settings.json` in the app data folder (macOS `~/Library/Application Support/rf-write`, Windows `%APPDATA%\rf-write`, Linux `~/.config/rf-write`).
+The `rf-write` command is available after installation (a one-line installer is planned); in development, `npm run dev` starts the app. Settings live in `settings.json` in the app data folder (macOS `~/Library/Application Support/rf-write`, Windows `%APPDATA%\rf-write`, Linux `~/.config/rf-write`); edit them under „Einstellungen …“ (macOS Cmd+, in the app menu, otherwise Ctrl+, in the „Datei“ menu).
 
 The preview uses rf-document's fonts from its install folder and otherwise falls back to system fonts. Body text is set justified without hyphenation, like the PDF from rf-document; Typst hyphenates only on export.
 
@@ -88,6 +88,8 @@ npm test                          # unit tests (Vitest)
 npx vitest run tests/unit/main/files.test.ts   # single test file
 npm run test:e2e                  # end-to-end (Playwright + Electron)
 ```
+
+In development (`npm run dev`) rf-write uses its own app data folder `rf-write-dev` next to `rf-write` (e.g. macOS `~/Library/Application Support/rf-write-dev`), so an installed app and the development build never share settings, session or the single-instance lock. `RFW_USER_DATA` (tests) overrides the folder.
 
 ## Project Structure
 

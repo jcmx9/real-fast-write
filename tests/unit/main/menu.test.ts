@@ -265,3 +265,32 @@ describe('PresentKeyGuard', () => {
     expect(s.d.command).toHaveBeenCalledTimes(2)
   })
 })
+
+describe('settings item', () => {
+  it('sits in the macOS app menu with Cmd+,', () => {
+    const d = deps()
+    const template = buildMenuTemplate(d)
+    const appMenu = template[0]
+    const items = Array.isArray(appMenu?.submenu) ? appMenu.submenu : []
+    const settings = items.find((i) => i.id === 'settings')
+    expect(settings?.label).toBe('Einstellungen …')
+    expect(settings?.accelerator).toBe('CmdOrCtrl+,')
+    expect(items.some((i) => i.role === 'quit')).toBe(true)
+    click(settings)
+    expect(d.command).toHaveBeenCalledWith('settings')
+    const file = template.find((m) => m.label === 'Datei')
+    const fileItems = Array.isArray(file?.submenu) ? file.submenu : []
+    expect(fileItems.some((i) => i.id === 'settings')).toBe(false)
+  })
+
+  it.each(['win32', 'linux'] as const)('sits in the File menu on %s with Ctrl+,', (platform) => {
+    const d = deps({ platform })
+    const file = buildMenuTemplate(d).find((m) => m.label === 'Datei')
+    const items = Array.isArray(file?.submenu) ? file.submenu : []
+    const settings = items.find((i) => i.id === 'settings')
+    expect(settings?.label).toBe('Einstellungen …')
+    expect(settings?.accelerator).toBe('CmdOrCtrl+,')
+    click(settings)
+    expect(d.command).toHaveBeenCalledWith('settings')
+  })
+})

@@ -19,4 +19,7 @@ export const Ch = {
   fullScreenLeft: 'rfw:fullscreen-left',
   fullScreenRefused: 'rfw:fullscreen-refused',
   listSnippets: 'rfw:list-snippets',
+  settingsStatus: 'rfw:settings-get-status',
+  updateSettings: 'rfw:settings-update',
+  choosePath: 'rfw:settings-choose-path',
 } as const

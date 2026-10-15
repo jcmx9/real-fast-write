@@ -23,6 +23,21 @@ export interface Settings {
   /** Empty = locate automatically. */
   rfDocumentPath: string
   presentFontFactor: number
+  /** How the YAML header of a note opened without a session entry shows in the Preview. */
+  headerDefault: HeaderDefault
+}
+
+export type HeaderDefault = 'yaml' | 'titleblock'
+
+export type SettingsPatch = Partial<Settings>
+
+export type ChooseKind = 'folder' | 'file'
+
+/** Read-only status for the settings dialog. */
+export interface SettingsStatus {
+  /** path null: not found; version null: `rf-document --version` gave no answer. */
+  rfDocument: { path: string | null; version: string | null }
+  fonts: FontStatus
 }
 
 export type Mode = 'edit' | 'present'
@@ -96,6 +111,7 @@ export type MenuCommand =
   | 'zoom-in'
   | 'zoom-out'
   | 'zoom-reset'
+  | 'settings'
 
 export interface RfwApi {
   startup(): Promise<StartupState>
@@ -130,6 +146,11 @@ export interface RfwApi {
   /** The OS did not enter the fullscreen the app requested; Present continues windowed. */
   onFullScreenRefused(cb: () => void): void
   listSnippets(): Promise<SnippetDef[]>
+  getSettingsStatus(): Promise<SettingsStatus>
+  /** Main validates every value; resolves to the settings now in effect (invalid ones dropped). */
+  updateSettings(patch: SettingsPatch): Promise<Settings>
+  /** Native picker; resolves to the canonical path, or null when cancelled. */
+  choosePath(kind: ChooseKind, current: string): Promise<string | null>
 }
 
 export interface SnippetDef {

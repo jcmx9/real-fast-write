@@ -187,9 +187,12 @@ The settings are stored as JSON in the app data folder:
 - default folder for new files
 - snippet folder
 - rf-document path (empty = auto)
-- Present font factor (default 1.6)
+- Present font factor (default 1.6, 1.0–3.0)
+- header default: how the YAML header of a note opened without a session entry shows in the Preview, `yaml` (default) or `titleblock` (collapsed into the title block, like Mod+Shift+H)
 
-The dialog also shows a read-only status: whether rf-document and the fonts were found, with path and version (`rf-document --version`).
+The dialog („Einstellungen …“: macOS app menu Cmd+, ; Windows/Linux „Datei“ menu Ctrl+,) edits these values; main validates every value and keeps the current one for anything invalid, so invalid input never persists. Changing a folder never moves or deletes files. The dialog is not available in Present. It also shows a read-only status: whether rf-document and the fonts were found, with path and version (`rf-document --version`, run without a shell and with a timeout).
+
+In development (not packaged) the app data folder is `rf-write-dev` unless `RFW_USER_DATA` is set, so an installed app and `npm run dev` never share settings, session or the single-instance lock.
 
 ## 12. Fonts
 

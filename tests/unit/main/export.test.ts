@@ -2,7 +2,12 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { buildCommand, runRfDocument } from '../../../src/main/export'
+import {
+  buildCommand,
+  parseVersion,
+  rfDocumentVersion,
+  runRfDocument,
+} from '../../../src/main/export'
 import { makeFakeRfDocument } from '../../helpers/fake-rf-document'
 
 let dir: string
@@ -80,5 +85,38 @@ describe('runRfDocument', () => {
     const { bin, argsFile } = await makeFakeRfDocument(dir, { stdout: 'OK' })
     await runRfDocument(bin, umlaut)
     expect(await readFile(argsFile, 'utf8')).toBe(umlaut)
+  })
+})
+
+describe('rfDocumentVersion', () => {
+  it('runs `--version` and returns the version of the first line', async () => {
+    const { bin, argsFile } = await makeFakeRfDocument(dir, { stdout: 'rf-document 26.10.17' })
+    expect(await rfDocumentVersion(bin)).toBe('26.10.17')
+    expect((await readFile(argsFile, 'utf8')).trim()).toBe('--version')
+  })
+
+  it('is null for a failing or missing binary', async () => {
+    const { bin } = await makeFakeRfDocument(dir, { stdout: 'rf-document 1.0.0', code: 1 })
+    expect(await rfDocumentVersion(bin)).toBeNull()
+    expect(await rfDocumentVersion(join(dir, 'gibt-es-nicht'))).toBeNull()
+  })
+
+  it('gives up after the timeout', async () => {
+    const { bin } = await makeFakeRfDocument(dir, { sleepSeconds: 5, stdout: 'rf-document 1.0.0' })
+    const started = Date.now()
+    expect(await rfDocumentVersion(bin, { timeoutMs: 300 })).toBeNull()
+    expect(Date.now() - started).toBeLessThan(3000)
+  })
+})
+
+describe('parseVersion', () => {
+  it.each([
+    ['rf-document 26.10.17\ntypst 0.15.0 (3ae52774)', '26.10.17'],
+    ['\r\nrf-document 26.4.0-dev.2\r\n', '26.4.0-dev.2'],
+    ['v1.2', '1.2'],
+    ['irgendwas', 'irgendwas'],
+    ['', null],
+  ])('%j → %s', (out, version) => {
+    expect(parseVersion(out)).toBe(version)
   })
 })
