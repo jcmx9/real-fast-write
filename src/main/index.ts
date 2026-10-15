@@ -1,10 +1,12 @@
 import { app } from 'electron'
 import { argsFromArgv, HELP_TEXT, parseCli } from './cli'
 import { AppContext } from './context'
+import { handleFontProtocol, registerFontScheme } from './font-protocol'
 import { registerIpc } from './ipc'
 
 // Must run before requestSingleInstanceLock: the lock lives in userData.
 if (process.env.RFW_USER_DATA) app.setPath('userData', process.env.RFW_USER_DATA)
+registerFontScheme()
 
 const cli = parseCli(argsFromArgv(process.argv, app.isPackaged), process.cwd())
 
@@ -50,6 +52,7 @@ function run(initial: string[]): void {
 
   void app.whenReady().then(async () => {
     await ctx.load()
+    handleFontProtocol(ctx.fonts.dir)
     registerIpc(ctx)
     ctx.markInitialized()
     if (!ctx.window) ctx.createWindow()

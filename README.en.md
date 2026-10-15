@@ -13,7 +13,7 @@
 
 ## Status
 
-In development. Available: tabs, autosave with atomic writes, rename, session restore, detection of external changes and PDF export via rf-document. Not yet available: the PDF look in the preview, presentation mode, snippets and one-line installation.
+In development. Available: tabs, autosave with atomic writes, rename, session restore, detection of external changes and PDF export via rf-document, and the PDF look in the preview. Not yet available: presentation mode, snippets and one-line installation.
 
 ## Prerequisites (development)
 
@@ -32,6 +32,8 @@ rf-write --help
 
 The `rf-write` command is available after installation (a one-line installer is planned); in development, `npm run dev` starts the app. Settings live in `settings.json` in the app data folder (macOS `~/Library/Application Support/rf-write`, Windows `%APPDATA%\rf-write`, Linux `~/.config/rf-write`).
 
+The preview uses rf-document's fonts from its install folder and otherwise falls back to system fonts.
+
 | Shortcut | Action |
 |----------|--------|
 | Mod+N | New note in the default folder (`YYYY-MM-DD_HH-mm-ss.md`) |
@@ -39,6 +41,10 @@ The `rf-write` command is available after installation (a one-line installer is 
 | Mod+Shift+R | Rename |
 | Mod+W | Close tab |
 | Mod+E | Export PDF |
+| Mod+Shift+M | Toggle code view (preview is the default) |
+| Mod+Shift+H | Show/hide the YAML header in the preview (hidden, the title block appears as in the PDF) |
+| macOS Cmd+Alt+[ / ], otherwise Ctrl+Shift+[ / ] | Fold/unfold section |
+| macOS Ctrl+Alt+[ / ], otherwise Alt+0 / Alt+Shift+0 | Fold/unfold all sections |
 | Ctrl+Tab / Ctrl+Shift+Tab, Mod+1…9 | Switch tabs |
 | Mod+Z / Mod+Shift+Z, Mod+X/C/V, Mod+A | Undo/Redo, Cut/Copy/Paste, Select all |
 

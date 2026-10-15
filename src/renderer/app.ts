@@ -1,8 +1,12 @@
 import { redo, selectAll, undo } from '@codemirror/commands'
+import { foldCode, unfoldAll, unfoldCode } from '@codemirror/language'
+import type { TransactionSpec } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import type { ExportResult, MenuCommand, NoteFile, View } from '../shared/types'
 import { AutosaveScheduler } from './editor/autosave'
-import { createState, serializeDoc } from './editor/setup'
+import { headerHidden, headerToggleSpec } from './editor/header'
+import { foldAllSections } from './editor/sections'
+import { createState, serializeDoc, viewCompartment, viewExtensions } from './editor/setup'
 import { type Tab, TabStore } from './tabs/tab-store'
 import { Notices } from './ui/notices'
 import { askText } from './ui/prompt'
@@ -85,6 +89,12 @@ export class App {
 
   async start(): Promise<void> {
     const startup = await this.rfw.startup()
+    if (!startup.fonts.found) {
+      this.notices.panel(
+        'Schriften nicht gefunden',
+        `Die Schriften von real-fast-document fehlen in:\n${startup.fonts.dir}\n\nrf-write nutzt Systemschriften, bis rf-document installiert ist.\n\n${INSTALL_HINT}`,
+      )
+    }
     this.view = startup.session.view
     for (const t of startup.session.tabs) await this.openPath(t.path, t.headerHidden)
     const activePath = startup.session.tabs[startup.session.activeIndex]?.path
@@ -126,6 +136,26 @@ export class App {
         return this.editCommand('redo', redo)
       case 'select-all':
         return this.editCommand('selectAll', selectAll)
+      case 'toggle-view':
+        return this.setView(this.view === 'code' ? 'preview' : 'code')
+      case 'toggle-header':
+        return this.toggleHeader()
+      case 'fold':
+        foldCode(this.editor)
+        this.editor.focus()
+        return
+      case 'unfold':
+        unfoldCode(this.editor)
+        this.editor.focus()
+        return
+      case 'fold-all':
+        foldAllSections(this.editor)
+        this.editor.focus()
+        return
+      case 'unfold-all':
+        unfoldAll(this.editor)
+        this.editor.focus()
+        return
     }
   }
 
@@ -162,7 +192,7 @@ export class App {
     const path = await this.rfw.newNotePath()
     this.store.add({
       path,
-      state: createState('', '\n', this.view),
+      state: createState('', '\n', this.view, false),
       bom: false,
       eol: '\n',
       onDisk: false,
@@ -179,7 +209,7 @@ export class App {
     this.show()
   }
 
-  private async openPath(path: string, headerHidden = false): Promise<boolean> {
+  private async openPath(path: string, hideHeader = false): Promise<boolean> {
     const open = this.store.findByPath(path)
     if (open) {
       this.store.activate(this.store.all.indexOf(open))
@@ -192,13 +222,49 @@ export class App {
     }
     this.store.add({
       path,
-      state: createState(res.text, res.eol, this.view),
+      state: createState(res.text, res.eol, this.view, hideHeader),
       bom: res.bom,
       eol: res.eol,
       onDisk: true,
-      headerHidden,
+      headerHidden: hideHeader,
     })
     return true
+  }
+
+  /** Code <-> Preview for every tab; the documents are never touched. */
+  private setView(view: View): void {
+    if (view === this.view) return
+    this.view = view
+    const reconfigure = viewCompartment.reconfigure(viewExtensions(view))
+    for (const tab of this.store.all) {
+      const shown = tab.id === this.shownId
+      const state = shown ? this.editor.state : tab.state
+      // Entering Preview with a collapsed header: move a cursor out of the hidden block.
+      const spec: TransactionSpec =
+        view === 'preview' && state.field(headerHidden) ? headerToggleSpec(state, true) : {}
+      const merged: TransactionSpec = {
+        ...spec,
+        effects: [reconfigure, ...[spec.effects ?? []].flat()],
+      }
+      if (shown) this.editor.dispatch(merged)
+      else this.store.updateState(tab.id, state.update(merged).state)
+    }
+    this.syncMain()
+    this.editor.focus()
+  }
+
+  private toggleHeader(): void {
+    const tab = this.shownId === null ? undefined : this.store.get(this.shownId)
+    if (!tab) return
+    if (this.view !== 'preview') {
+      this.notices.toast('Der YAML-Header lässt sich nur in der Preview ausblenden.')
+      return
+    }
+    const hide = !this.editor.state.field(headerHidden)
+    this.editor.dispatch(headerToggleSpec(this.editor.state, hide))
+    tab.headerHidden = hide
+    this.syncMain()
+    this.editor.focus()
   }
 
   private async closeTab(id: number): Promise<void> {
@@ -409,7 +475,7 @@ export class App {
   }
 
   private reload(tab: Tab, note: NoteFile): void {
-    const state = createState(note.text, note.eol, this.view)
+    const state = createState(note.text, note.eol, this.view, tab.headerHidden)
     tab.bom = note.bom
     tab.eol = note.eol
     this.store.updateState(tab.id, state)
