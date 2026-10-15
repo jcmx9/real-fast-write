@@ -62,7 +62,8 @@ desktop_path="${HOME}/.local/share/applications/rf-write.desktop"
 case "$(uname -s)" in
   Darwin)
     install_dir="${RFW_HOME}/rf-write.app"
-    marker="${install_dir}/Contents/.rf-write-install"
+    # Outside the signed bundle; with RFW_HOME it sits next to the app.
+    marker="${RFW_HOME}/.rf-write-install"
     ;;
   Linux)
     install_dir="${RFW_HOME}"
@@ -76,6 +77,11 @@ run_bootstrap() {
 
 assert_installed() {
   [[ -f "${marker}" ]] || fail "marker missing: ${marker}"
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    [[ "$(cat "${marker}")" == "${install_dir}" ]] || fail "marker does not name ${install_dir}"
+    [[ -z "$(find "${install_dir}" -name '.rf-write-install')" ]] || fail "marker written into the app bundle"
+    codesign --verify --deep --strict "${install_dir}" || fail "code seal of the installed app is broken"
+  fi
   [[ -x "${command_path}" ]] || fail "command missing: ${command_path}"
   if [[ "$(uname -s)" == "Linux" ]]; then
     [[ -x "${install_dir}/rf-write.AppImage" ]] || fail "AppImage missing"
@@ -224,6 +230,7 @@ echo "${out}"
 [[ ! -e "${install_dir}" ]] || fail "install folder still there"
 [[ ! -e "${command_path}" ]] || fail "command still there"
 [[ ! -e "${desktop_path}" ]] || fail ".desktop entry still there"
+[[ ! -e "${marker}" ]] || fail "marker still there"
 [[ -x "${RF_DOCUMENT}" ]] || fail "rf-document was touched"
 grep -q 'rf-document' <<<"${out}" || fail "final message does not mention rf-document"
 pass "uninstall removed everything"
@@ -251,5 +258,28 @@ set -e
 [[ "${code}" -eq 1 ]] || fail "install over unmarked folder exited ${code}, expected 1"
 [[ -f "${keep}" ]] || fail "install replaced an unmarked folder"
 pass "unmarked folder: uninstall and install refuse (exit 1), folder intact"
+
+# 8. macOS: a marker is not enough – an app with a different bundle ID is never deleted.
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  rm -rf "${install_dir}"
+  mkdir -p "${install_dir}/Contents"
+  /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string com.example.other" \
+    "${install_dir}/Contents/Info.plist" >/dev/null
+  echo keep >"${keep}"
+  printf '%s\n' "${install_dir}" >"${marker}"
+  set +e
+  run_bootstrap --uninstall >/dev/null 2>&1
+  code=$?
+  set -e
+  [[ "${code}" -eq 1 ]] || fail "uninstall of foreign bundle ID exited ${code}, expected 1"
+  [[ -f "${keep}" ]] || fail "uninstall deleted an app with a foreign bundle ID"
+  set +e
+  RFW_ARCHIVE="${archive}" run_bootstrap >/dev/null 2>&1
+  code=$?
+  set -e
+  [[ "${code}" -eq 1 ]] || fail "install over foreign bundle ID exited ${code}, expected 1"
+  [[ -f "${keep}" ]] || fail "install replaced an app with a foreign bundle ID"
+  pass "foreign bundle ID with marker: uninstall and install refuse (exit 1), app intact"
+fi
 
 echo "All bootstrap checks passed."

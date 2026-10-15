@@ -11,6 +11,8 @@
 # Lädt das passende Archiv der GitHub-Release, prüft es gegen SHA256SUMS und
 # installiert ohne Adminrechte:
 #   macOS: ~/Applications/rf-write.app
+#          (Marker ~/.local/share/real-fast-write/.rf-write-install, außerhalb der
+#          signierten App; Inhalt: Pfad der App)
 #   Linux: ~/.local/share/real-fast-write/rf-write.AppImage
 #          + ~/.local/share/applications/rf-write.desktop
 #   Befehl: ~/.local/bin/rf-write
@@ -18,8 +20,8 @@
 #
 # Umgebung (für Tests):
 #   RFW_ARCHIVE  lokales Archiv statt Download (keine Prüfsumme)
-#   RFW_HOME     Installordner (macOS: Ordner, der rf-write.app enthält;
-#                Linux: Ordner mit rf-write.AppImage)
+#   RFW_HOME     Installordner (macOS: Ordner, der rf-write.app enthält – dort liegt
+#                dann auch der Marker; Linux: Ordner mit rf-write.AppImage)
 #
 # Exit-Codes: 0 ok · 1 Sicherheitsabbruch (fremder Ordner ohne Marker) ·
 #   2 falscher Aufruf · 3 System nicht unterstützt / Werkzeug fehlt ·
@@ -41,6 +43,7 @@ readonly repo="jcmx9/real-fast-write"
 readonly api="https://api.github.com/repos/${repo}/releases"
 readonly rfd_bootstrap="https://raw.githubusercontent.com/jcmx9/real-fast-document/main/scripts/bootstrap.sh"
 readonly marker_name=".rf-write-install"
+readonly bundle_id="io.github.jcmx9.rfwrite"
 readonly launcher_tag="# rf-write launcher (real-fast-write bootstrap)"
 readonly desktop_tag="X-RfWrite-Bootstrap=true"
 
@@ -95,7 +98,10 @@ detect_platform() {
   if [[ "${os}" == "Darwin" ]]; then
     # install_dir is the unit that gets replaced and deleted: the .app bundle.
     install_dir="${RFW_HOME:-${HOME}/Applications}/rf-write.app"
-    marker="${install_dir}/Contents/${marker_name}"
+    # Never write into the signed bundle (it would break the code seal): the marker lives
+    # outside the app and names it; deleting additionally requires rf-write's bundle ID.
+    marker_dir="${RFW_HOME:-${data_home}/real-fast-write}"
+    marker="${marker_dir}/${marker_name}"
     app_exe="${install_dir}/Contents/MacOS/rf-write"
   else
     install_dir="${RFW_HOME:-${data_home}/real-fast-write}"
@@ -116,10 +122,39 @@ asset_name() {
 
 # --- Ownership checks ---------------------------------------------------------
 
+app_bundle_id() {
+  /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$1/Contents/Info.plist" 2>/dev/null || true
+}
+
+# True only for an install this bootstrap made. macOS: the marker names this app AND the
+# bundle is rf-write's; Linux: the marker file sits in the install folder.
+owns_install() {
+  if [[ "${os}" == "Darwin" ]]; then
+    [[ -f "${marker}" && "$(cat "${marker}")" == "${install_dir}" ]] &&
+      [[ "$(app_bundle_id "${install_dir}")" == "${bundle_id}" ]]
+  else
+    [[ -f "${marker}" ]]
+  fi
+}
+
+# Same for a leftover <install_dir>.old from an interrupted update.
+owns_old() {
+  local old="$1"
+  if [[ "${os}" == "Darwin" ]]; then
+    [[ -f "${marker}" && "$(app_bundle_id "${old}")" == "${bundle_id}" ]]
+  else
+    [[ -f "${old}/${marker_name}" ]]
+  fi
+}
+
 # Prints what is in a folder rf-write would otherwise delete, and stops.
 refuse_foreign() {
   local path="$1"
-  echo "Error: ${path} existiert, trägt aber keinen rf-write-Installationsmarker (${marker_name})." >&2
+  if [[ "${os}" == "Darwin" ]]; then
+    echo "Error: ${path} existiert, ist aber keine rf-write-Installation dieses Skripts (Marker ${marker} fehlt oder Bundle-ID ≠ ${bundle_id})." >&2
+  else
+    echo "Error: ${path} existiert, trägt aber keinen rf-write-Installationsmarker (${marker_name})." >&2
+  fi
   echo "Gefunden:" >&2
   ls -la "${path}" >&2 || true
   die 1 "Abbruch – der Ordner wird nicht angetastet. Bitte selbst prüfen und ggf. entfernen."
@@ -215,7 +250,8 @@ stage_install() {
       die 6 "Archiv enthält kein rf-write.app: ${archive}"
     # Downloaded or copied archives may carry Gatekeeper's quarantine flag; the app is unsigned.
     xattr -dr com.apple.quarantine "${stage_dir}" 2>/dev/null || true
-    touch "${stage_dir}/Contents/${marker_name}"
+    [[ "$(app_bundle_id "${stage_dir}")" == "${bundle_id}" ]] ||
+      die 6 "Archiv enthält kein rf-write (Bundle-ID ≠ ${bundle_id}): ${archive}"
     # Smoke test before the old install is touched (prints the version, opens no window).
     local out
     out="$("${stage_dir}/Contents/MacOS/rf-write" --version </dev/null 2>/dev/null)" ||
@@ -238,7 +274,7 @@ swap_install() {
   local old="${install_dir}.old"
   if [[ -e "${old}" ]]; then
     # Leftover from an interrupted run: only ours may go.
-    if [[ -f "${old}/Contents/${marker_name}" || -f "${old}/${marker_name}" ]]; then
+    if owns_old "${old}"; then
       rm -rf "${old}"
     else
       refuse_foreign "${old}"
@@ -253,6 +289,10 @@ swap_install() {
   fi
   rm -rf "${old}" "${stage_root}"
   stage_root=""
+  if [[ "${os}" == "Darwin" ]]; then
+    mkdir -p "${marker_dir}"
+    printf '%s\n' "${install_dir}" >"${marker}"
+  fi
 }
 
 write_launcher() {
@@ -355,7 +395,7 @@ ensure_rf_document() {
 }
 
 do_install() {
-  if [[ -e "${install_dir}" && ! -f "${marker}" ]]; then
+  if [[ -e "${install_dir}" ]] && ! owns_install; then
     refuse_foreign "${install_dir}"
   fi
   if [[ -n "${RFW_ARCHIVE:-}" ]]; then
@@ -367,7 +407,7 @@ do_install() {
     download_release
   fi
 
-  if [[ -f "${marker}" ]]; then
+  if [[ -e "${install_dir}" ]]; then
     say "Aktualisiere ${install_dir}"
   else
     say "Installiere nach ${install_dir}"
@@ -406,16 +446,25 @@ remove_own_entries() {
   fi
 }
 
+# macOS keeps the marker outside the app; drop it (and the default folder if now empty).
+remove_mac_marker() {
+  [[ "${os}" == "Darwin" ]] || return 0
+  rm -f "${marker}"
+  [[ -n "${RFW_HOME:-}" ]] || rmdir "${marker_dir}" 2>/dev/null || true
+}
+
 do_uninstall() {
   if [[ ! -e "${install_dir}" ]]; then
     echo "Nichts zu deinstallieren: ${install_dir} existiert nicht."
     remove_own_entries
+    remove_mac_marker
     exit 0
   fi
-  [[ -f "${marker}" ]] || refuse_foreign "${install_dir}"
+  owns_install || refuse_foreign "${install_dir}"
   remove_own_entries
   say "Lösche ${install_dir}"
   rm -rf "${install_dir}"
+  remove_mac_marker
   ok "rf-write deinstalliert. rf-document, Einstellungen und Notizen bleiben unangetastet."
 }
 
