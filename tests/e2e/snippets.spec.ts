@@ -22,6 +22,18 @@ async function newNotePath(notes: string): Promise<string> {
 
 const popup = (page: Page) => page.locator('.cm-tooltip-autocomplete')
 
+/** Asserts that a condition holds for a whole window (catches a late change, e.g. a late exit). */
+async function holds(check: () => Promise<boolean>, ms = 600): Promise<void> {
+  const end = Date.now() + ms
+  while (Date.now() < end) {
+    expect(await check()).toBe(true)
+    await new Promise((r) => setTimeout(r, 100))
+  }
+}
+
+/** CM keeps a typing-triggered query pending ~100 ms; an Esc in that window only closes it. */
+const settle = (page: Page) => page.waitForTimeout(300)
+
 /** Completion opens after a short delay and ignores accept keys right after opening. */
 async function acceptFirst(page: Page): Promise<void> {
   await expect(popup(page)).toBeVisible()
@@ -82,7 +94,9 @@ test('Present: first Esc closes the list, second Esc leaves Present', async () =
   await expect(popup(page)).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(popup(page)).toHaveCount(0)
-  await expect(page.locator('body.rf-mode-present')).toHaveCount(1)
+  await holds(async () => (await page.locator('body.rf-mode-present').count()) === 1)
+  await expect(page.locator('.cm-content')).toContainText('Text :mee')
+  await expect(page.locator('.cm-content')).not.toContainText('client:')
   await page.keyboard.press('Escape')
   await expect(page.locator('body.rf-mode-present')).toHaveCount(0)
   await app.close()
@@ -103,8 +117,14 @@ test('user snippet overrides a built-in and a new file appears after focus', asy
   await writeFile(join(snippetFolder, 'kunde.tpl.md'), 'Kunde: $1')
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
   await page.keyboard.press('Enter')
-  await page.keyboard.type(':kun')
-  await expect(popup(page)).toContainText(':kunde')
+  // The focus rescan is async IPC: retype until the registry has the new snippet.
+  await expect(async () => {
+    await page.keyboard.press('Escape')
+    await page.keyboard.press('Shift+Home')
+    await page.keyboard.press('Backspace')
+    await page.keyboard.type(':kun')
+    await expect(popup(page)).toContainText(':kunde', { timeout: 1000 })
+  }).toPass({ timeout: 10_000 })
   await app.close()
 })
 
@@ -116,5 +136,56 @@ test(':newpage inserts the page break byte-exact', async () => {
   const path = await newNotePath(notes)
   const saved = await waitForFile(path, (b) => b.toString('utf8').includes('pagebreak'))
   expect(saved.toString('utf8')).toBe('\n<!-- pagebreak -->\n\n')
+  await app.close()
+})
+
+test('Present, new note: :meeting fills client and title, then the title block shows them', async () => {
+  const { app, page, notes } = await launch()
+  await clickMenu(app, 'new')
+  await clickMenu(app, 'toggle-present')
+  await expect(page.locator('body.rf-mode-present')).toHaveCount(1)
+  await page.locator('.cm-content').click()
+  await page.keyboard.type(':mee')
+  await acceptFirst(page)
+  await page.keyboard.type('ACME')
+  await page.keyboard.press('Tab')
+  await page.keyboard.type('Kickoff')
+  await settle(page)
+  // First Esc ends the snippet session: the header collapses to the title block.
+  await page.keyboard.press('Escape')
+  await expect(page.locator('.rf-titleblock .rf-tb-title')).toHaveText('Kickoff')
+  await expect(page.locator('.rf-titleblock .rf-tb-client')).toHaveText('ACME')
+  await holds(async () => (await page.locator('body.rf-mode-present').count()) === 1)
+  const path = await newNotePath(notes)
+  const saved = await waitForFile(path, (b) => b.toString('utf8').includes('Kickoff'))
+  expect(
+    saved.toString('utf8').startsWith(`---\nclient: "ACME"\ntitle: "Kickoff"\ndate: ${today()}\n`),
+  ).toBe(true)
+  // Typing now goes below the header, never into it.
+  await page.keyboard.type('Notiz')
+  const after = await waitForFile(path, (b) => b.toString('utf8').includes('Notiz'))
+  expect(after.toString('utf8').startsWith('---\nclient: "ACME"\ntitle: "Kickoff"\n')).toBe(true)
+  await app.close()
+})
+
+test('switching tabs closes an open snippet list', async () => {
+  const dirs = await makeDirs()
+  const a = join(dirs.notes, 'A.md')
+  const b = join(dirs.notes, 'B.md')
+  await writeFile(a, 'Alpha')
+  await writeFile(b, 'Beta')
+  const { app, page } = await launch({ dirs, args: [a, b] })
+  await page.locator('.cm-content').click()
+  await page.keyboard.press('End')
+  await page.keyboard.type(' :mee')
+  await expect(popup(page)).toBeVisible()
+  const active = page.locator('#tabbar .tab.active')
+  const name = await active.textContent()
+  await page.locator('#tabbar .tab:not(.active)').first().click()
+  await expect(active).not.toHaveText(name ?? '')
+  await page.locator('#tabbar .tab:not(.active)').first().click()
+  await expect(active).toHaveText(name ?? '')
+  await page.waitForTimeout(300)
+  await expect(popup(page)).toHaveCount(0)
   await app.close()
 })
