@@ -5,6 +5,10 @@
   --chrome-muted: #888;
   --accent: #1f6f6a;
   --danger: #a4262c;
+  --surface: #fff;
+  --on-accent: #fff;
+  --line: #ccc;
+  --line-soft: #ddd;
   font-family: system-ui, sans-serif;
   font-size: 13px;
 }
@@ -12,7 +16,7 @@ html,
 body {
   margin: 0;
   height: 100%;
-  background: #fff;
+  background: var(--surface);
   color: #222;
 }
 [hidden] {
@@ -42,7 +46,7 @@ body {
   cursor: default;
 }
 .tab.active {
-  background: #fff;
+  background: var(--surface);
   color: var(--chrome-fg);
 }
 .tab.dirty .tab-label::after {
@@ -58,7 +62,7 @@ body {
 .tab-close:focus-visible {
   opacity: 1;
 }
-:where(#status, #empty, .panel, .banner, dialog.prompt, #infoline, .tab-close) button,
+:where(#status, #empty, .panel, .banner, dialog.prompt, #infoline) button,
 button.tab-close {
   appearance: none;
   border: 0;
@@ -104,10 +108,10 @@ dialog.prompt button[type="submit"]:hover:not(:disabled) {
 #empty [data-action="new"]:active:not(:disabled),
 dialog.prompt button[type="submit"]:active:not(:disabled) {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 dialog.prompt input {
-  border: 1px solid #ccc;
+  border: 1px solid var(--line);
   border-radius: 6px;
   padding: 4px 8px;
   font: inherit;
@@ -133,10 +137,12 @@ dialog.prompt input:focus-visible {
   padding: 4px 14px;
   font-size: 12px;
   color: var(--chrome-muted);
-  background: var(--rfd-bg, #fff);
+  background: var(--rfd-bg, var(--surface));
 }
 #infoline button {
   padding: 2px 6px;
+  /* Muted like the info line; only the active tab is lifted. */
+  color: inherit;
 }
 #infoline .rf-il-tab.active {
   color: var(--chrome-fg);
@@ -187,8 +193,8 @@ dialog.prompt input:focus-visible {
 .toast,
 .panel,
 .banner {
-  background: #fff;
-  border: 1px solid #ddd;
+  background: var(--surface);
+  border: 1px solid var(--line-soft);
   border-radius: 6px;
   padding: 8px 12px;
   box-shadow: 0 2px 8px rgb(0 0 0 / 0.12);
@@ -210,7 +216,7 @@ dialog.prompt h2 {
   justify-content: flex-end;
 }
 dialog.prompt {
-  border: 1px solid #ccc;
+  border: 1px solid var(--line);
   border-radius: 8px;
   min-width: 320px;
 }
