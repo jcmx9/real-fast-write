@@ -60,7 +60,7 @@ There is exactly one window. All modes share one `EditorView` and one document p
 - The window goes fullscreen (`setFullScreen`), which hides the dock and menu bar on macOS and the taskbar on Windows. On Linux this depends on the window manager.
 - Only the text and the **info line** remain.
 - The view is Preview with a larger font (configurable factor, adjustable with zoom), a line length of about 70ch, centered.
-- The **YAML header is fully hidden**: no placeholder, and the cursor cannot enter it.
+- The **YAML header** shows rf-document's title block, as when it is hidden in Preview (decided 2026-10-15). Without any title fields it shows nothing at all. The header is read-only, and the cursor cannot enter it.
 - Editing stays fully available.
 - Info line at the bottom, unobtrusive: **clock**, **tabs** (click to switch), **switch to Edit**, **zoom − / +**, **save state**. There is no export button in Present.
 - `Esc` returns to Edit.
@@ -77,7 +77,7 @@ Zoom is stored separately for Edit and Present. In Edit, 100 % equals the PDF's 
 - Alerts `> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]` and `[!CAUTION]` get a left bar and tinted background in rf-document colors.
 - Tables look like the PDF (decided 2026-10-15): a block widget shows real columns, a centred bold head, alignment from the delimiter row (otherwise numbers right-aligned), every second data row striped, vertical rules and a rule under the head. A click on the table, or the cursor entering it, shows the Markdown text for editing. The widget never changes the text.
 - Fenced code blocks get Typst-like syntax colors.
-- Hyphenation is not required, because Typst hyphenates in the PDF. Body text is justified if `hyphens: auto` works for `lang="de"` in Electron, otherwise flush-left. Headings are always flush-left.
+- Body text is justified without hyphenation on every OS (decided 2026-10-15). rf-document sets `par(justify: true)`, and Typst hyphenates only in the PDF. Headings, tables, code, the title block and the front matter stay flush-left, as in the PDF.
 - **Theme values:** all sizes, spacings, colors and font features come from `zettlr_rfdoc-Export/zettlr/rfdoc-zettlr.css`. They become CSS custom properties in `src/renderer/theme.css`, which names rf-document's `template.typ` as its source of truth. Only the values are ported. Zettlr's selectors (`.cm-header-1`, `.rendered-bullet`, …) do not apply.
 - Sizes: body 10 pt; `#` 14 pt with a hairline; `##` 12 pt; `###` underlined; `####` and below italic. Oldstyle figures in body text (`font-variant-numeric: oldstyle-nums`).
 
@@ -110,7 +110,7 @@ Zoom is stored separately for Edit and Present. In Edit, 100 % equals the PDF's 
 
 ## 7. Session and start
 
-- The session is stored in the app data folder and covers open tab paths, active tab, mode, view, header toggles and zoom per mode.
+- The session is stored in the app data folder and covers open tab paths, active tab, view, header toggles and zoom per mode. The app always starts in Edit, never in fullscreen Present.
 - `rf-write` without an argument restores the session. An empty session opens a new note.
 - `rf-write file.md` restores the session and opens or focuses `file.md`.
 - **Single instance:** a second start hands its arguments to the running window (`requestSingleInstanceLock` / `second-instance`, macOS `open-file`).
@@ -167,7 +167,7 @@ Zoom is stored separately for Edit and Present. In Edit, 100 % equals the PDF's 
 | | YAML header show/hide | Mod+Shift+H |
 | | Fold / unfold section | macOS Cmd+Alt+[ / ], else Ctrl+Shift+[ / ] |
 | | Fold all / unfold all | macOS Ctrl+Alt+[ / ], else Alt+0 / Alt+Shift+0 (Ctrl+Alt is AltGr there and types `[` / `]`) |
-| | Zoom in / out / 100 % | Mod+= / Mod+- / Mod+0 |
+| | Zoom in / out / 100 % | Mod+Plus (also Mod+= ) / Mod+- / Mod+0 |
 | Window | Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab, Mod+1…9 |
 
 ## 11. Settings

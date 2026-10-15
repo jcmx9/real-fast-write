@@ -106,9 +106,10 @@
   margin: 0 auto;
   padding: 2em 1.5em 40vh;
 }
-html.rf-justify .rf-preview .cm-line {
+/* rf-document: par(justify: true). Typst hyphenates in the PDF; the editor never does. */
+.rf-preview .cm-line {
   text-align: justify;
-  hyphens: auto;
+  hyphens: manual;
 }
 
 /* Headings: serif, flush-left */

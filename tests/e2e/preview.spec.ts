@@ -28,12 +28,11 @@ test('renders the PDF look', async () => {
     /rf-al-right/,
   )
   await expect(page.locator('.cm-line.rf-codeblock').first()).toBeVisible()
-  const justified = await page.evaluate(() =>
-    document.documentElement.classList.contains('rf-justify'),
-  )
-  test
-    .info()
-    .annotations.push({ type: 'hyphenation', description: justified ? 'justified' : 'flush-left' })
+  // rf-document sets par(justify: true); the editor justifies without hyphenation on every OS.
+  const body = page.locator('.cm-line', { hasText: 'Ein Absatz mit' })
+  await expect(body).toHaveCSS('text-align', 'justify')
+  await expect(body).toHaveCSS('hyphens', 'manual')
+  await expect(page.locator('.cm-line.rf-h1')).toHaveCSS('text-align', 'left')
   await shot(page, 'preview')
   await app.close()
 })
