@@ -17,6 +17,7 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "dist": "electron-vite build && electron-builder --publish never",
     "start": "electron-vite preview",
     "lint": "biome check .",
     "format": "biome check --write .",
@@ -41,6 +42,7 @@
     "@types/node": "^24.19.2",
     "@vitest/coverage-v8": "^5.0.4",
     "electron": "^44.7.2",
+    "electron-builder": "^26.17.0",
     "electron-vite": "^6.0.0",
     "happy-dom": "^21.0.1",
     "typescript": "^7.0.2",
