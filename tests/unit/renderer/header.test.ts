@@ -1,7 +1,16 @@
 // @vitest-environment happy-dom
+import {
+  cursorCharLeft,
+  cursorDocStart,
+  deleteCharBackward,
+  selectAll,
+  undo,
+} from '@codemirror/commands'
 import { EditorState } from '@codemirror/state'
+import { EditorView } from '@codemirror/view'
 import { describe, expect, it } from 'vitest'
 import { headerFold, headerHidden, headerToggleSpec } from '../../../src/renderer/editor/header'
+import { createState, viewCompartment, viewExtensions } from '../../../src/renderer/editor/setup'
 
 const DOC = '---\ntitle: "Kickoff"\n---\n\n# Body'
 const END = DOC.indexOf('\n\n') // end of the closing ---
@@ -30,9 +39,9 @@ describe('headerFold', () => {
     expect(collapsed(make(DOC, false))).toEqual([])
     expect(collapsed(make('# Nur Text', true))).toEqual([])
   })
-  it('follows edits that change the header length', () => {
+  it('follows unfiltered edits (e.g. undo) that change the header length', () => {
     const s = make(DOC, true, DOC.length)
-    const next = s.update({ changes: { from: 4, insert: 'client: A\n' } }).state
+    const next = s.update({ changes: { from: 4, insert: 'client: A\n' }, filter: false }).state
     expect(collapsed(next)).toEqual([`header-fold@0-${END + 10}`])
   })
 })
@@ -60,5 +69,102 @@ describe('headerToggleSpec', () => {
     const only = '---\na: 1\n---'
     const s = make(only, false, 2)
     expect(s.update(headerToggleSpec(s, true)).state.selection.main.head).toBe(only.length)
+  })
+})
+
+describe('collapsed header in a real view', () => {
+  const HEAD = '---\ntitle: "Kickoff"\n---'
+  const TEXT = `${HEAD}\nErste Zeile\n\n---\nmehr`
+
+  function view(text = TEXT) {
+    const parent = document.createElement('div')
+    document.body.append(parent)
+    return new EditorView({ state: createState(text, '\n', 'preview', true), parent })
+  }
+
+  it('starts collapsed with the cursor on the first body line', () => {
+    const v = view()
+    expect(collapsed(v.state)).toEqual([`header-fold@0-${HEAD.length}`])
+    expect(v.state.selection.main.head).toBe(HEAD.length + 1)
+    v.destroy()
+  })
+
+  it('Backspace at the first body line leaves the header and its line break alone', () => {
+    const v = view()
+    deleteCharBackward(v)
+    expect(v.state.doc.toString()).toBe(TEXT)
+    v.destroy()
+  })
+
+  it('Left then Backspace keeps the header intact', () => {
+    const v = view()
+    cursorCharLeft(v)
+    expect(v.state.selection.main.head).toBe(HEAD.length + 1)
+    deleteCharBackward(v)
+    expect(v.state.doc.toString()).toBe(TEXT)
+    v.destroy()
+  })
+
+  it('document start lands after the header and typing goes there', () => {
+    const v = view()
+    cursorDocStart(v)
+    expect(v.state.selection.main.head).toBe(HEAD.length + 1)
+    v.dispatch(v.state.replaceSelection('x'))
+    expect(v.state.doc.toString()).toBe(`${HEAD}\nxErste Zeile\n\n---\nmehr`)
+    v.destroy()
+  })
+
+  it('a change inside the header is dropped, one after it passes', () => {
+    const v = view()
+    v.dispatch({ changes: { from: 0, insert: 'x' } })
+    v.dispatch({ changes: { from: HEAD.length, to: HEAD.length + 1 } })
+    expect(v.state.doc.toString()).toBe(TEXT)
+    v.dispatch({ changes: { from: TEXT.length, insert: '!' } })
+    expect(v.state.doc.toString()).toBe(`${TEXT}!`)
+    v.destroy()
+  })
+
+  it('select all + delete or typing keeps the header', () => {
+    const v = view()
+    selectAll(v)
+    deleteCharBackward(v)
+    expect(v.state.doc.toString()).toBe(`${HEAD}\n`)
+    selectAll(v)
+    v.dispatch(v.state.replaceSelection('neu'))
+    expect(v.state.doc.toString()).toBe(`${HEAD}\nneu`)
+    v.destroy()
+  })
+
+  it('undo still restores what was deleted after the header', () => {
+    const v = view()
+    selectAll(v)
+    deleteCharBackward(v)
+    undo(v)
+    expect(v.state.doc.toString()).toBe(TEXT)
+    v.destroy()
+  })
+
+  it('in Code view the header is editable again', () => {
+    const v = view()
+    v.dispatch({ effects: viewCompartment.reconfigure(viewExtensions('code')) })
+    v.dispatch({ selection: { anchor: HEAD.length + 1 } })
+    deleteCharBackward(v)
+    expect(v.state.doc.toString()).toBe(`${HEAD}Erste Zeile\n\n---\nmehr`)
+    cursorDocStart(v)
+    expect(v.state.selection.main.head).toBe(0)
+    v.dispatch(v.state.replaceSelection('x'))
+    expect(v.state.doc.toString()).toBe(`x${HEAD}Erste Zeile\n\n---\nmehr`)
+    v.destroy()
+  })
+
+  it('a header retyped while hidden stays visible while the cursor is on it', () => {
+    const s = make('---\na: 1\n--', true, 11)
+    const next = s.update({ changes: { from: 11, insert: '-' }, selection: { anchor: 12 } }).state
+    expect(collapsed(next)).toEqual([])
+    const away = next.update({
+      changes: { from: 12, insert: '\nx' },
+      selection: { anchor: 14 },
+    }).state
+    expect(collapsed(away)).toEqual(['header-fold@0-12'])
   })
 })
