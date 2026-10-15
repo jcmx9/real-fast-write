@@ -6,6 +6,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Fixed
+- macOS development: the menu bar, Dock and Cmd-Tab show "rf-write" instead of "Electron" (postinstall patches the dev Electron.app name)
 - A note opened under two path spellings (symlink, case, 8.3 name) uses one tab
 - External changes that are not UTF-8 or delete the note are reported and never silently overwritten
 - A failed folder watcher re-arms itself

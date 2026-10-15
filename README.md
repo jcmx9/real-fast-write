@@ -82,7 +82,7 @@ Eigene Snippets sind Dateien `name.tpl.md` im Snippet-Ordner (Standard `~/Docume
 git clone git@github.com:jcmx9/real-fast-write.git
 cd real-fast-write
 npm ci
-npm run dev                       # App mit Hot Reload
+npm run dev                       # App mit Hot Reload  (macOS: Menüleiste zeigt "rf-write", per postinstall)
 npm run lint && npm run typecheck
 npm test                          # Unit-Tests (Vitest)
 npx vitest run tests/unit/main/files.test.ts   # einzelne Testdatei
