@@ -403,7 +403,8 @@ describe('NoteWatcher re-arm', () => {
     expect(reads).toEqual([])
     vi.advanceTimersByTime(1)
     expect(attempts).toHaveLength(3)
-    await vi.advanceTimersByTimeAsync(0)
+    expect(reads).toEqual([])
+    await vi.advanceTimersByTimeAsync(100)
     expect(reads.sort()).toEqual([join(dir, 'a.md'), join(dir, 'b.md')])
     vi.advanceTimersByTime(60_000)
     expect(attempts).toHaveLength(3)
@@ -413,15 +414,16 @@ describe('NoteWatcher re-arm', () => {
   it('caps the backoff at 30 s', () => {
     const w = make(100)
     w.setFiles([join(dir, 'a.md')])
-    let total = 0
+    const delays: number[] = []
     for (const delay of [1000, 2000, 4000, 8000, 16000, 30000, 30000]) {
       vi.advanceTimersByTime(delay - 1)
       const before = attempts.length
       vi.advanceTimersByTime(1)
       expect(attempts.length).toBe(before + 1)
-      total += delay
+      delays.push(delay)
     }
-    expect(total).toBeGreaterThan(0)
+    expect(delays.at(-1)).toBe(30000)
+    expect(attempts).toHaveLength(8)
     w.close()
   })
 
@@ -433,7 +435,7 @@ describe('NoteWatcher re-arm', () => {
     expect(live[0]?.close).toHaveBeenCalled()
     vi.advanceTimersByTime(1000)
     expect(live).toHaveLength(2)
-    await vi.advanceTimersByTimeAsync(0)
+    await vi.advanceTimersByTimeAsync(100)
     expect(reads).toEqual([join(dir, 'a.md')])
     w.close()
   })
@@ -453,5 +455,123 @@ describe('NoteWatcher re-arm', () => {
     w.close()
     vi.advanceTimersByTime(120_000)
     expect(attempts).toHaveLength(1)
+  })
+
+  describe('with a fake disk', () => {
+    let disk: Map<string, Buffer>
+    let got: ExternalChange[]
+    const path = () => join(dir, 'n.md')
+
+    function setup(): NoteWatcher {
+      disk = new Map([[path(), Buffer.from('alt')]])
+      got = []
+      return new NoteWatcher(
+        (c) => got.push(c),
+        100,
+        async (p) => {
+          const b = disk.get(p)
+          if (!b) throw Object.assign(new Error('gone'), { code: 'ENOENT' })
+          return b
+        },
+        { watch: fakeWatch(0) },
+      )
+    }
+    const bytes = (t: string) => Buffer.from(t)
+
+    it('stays silent for our own write during the gap', async () => {
+      const w = setup()
+      await writeFile(path(), 'alt')
+      w.setFiles([path()])
+      live[0]?.fire()
+      w.expect(path(), hashBytes(bytes('eigen')))
+      disk.set(path(), bytes('eigen'))
+      await vi.advanceTimersByTimeAsync(1500)
+      expect(got).toEqual([])
+      w.close()
+    })
+
+    it('reports an external change during the gap exactly once', async () => {
+      const w = setup()
+      await writeFile(path(), 'alt')
+      w.setFiles([path()])
+      live[0]?.fire()
+      disk.set(path(), bytes('extern'))
+      await vi.advanceTimersByTimeAsync(1500)
+      expect(got).toEqual([
+        expect.objectContaining({
+          kind: 'changed',
+          note: expect.objectContaining({ text: 'extern' }),
+        }),
+      ])
+      live[1]?.fire()
+      await vi.advanceTimersByTimeAsync(1500)
+      expect(got).toHaveLength(1)
+      w.close()
+    })
+
+    it('reports a deleted folder as deleted after the confirm, then the restore as one change', async () => {
+      const w = setup()
+      await writeFile(path(), 'alt')
+      w.setFiles([path()])
+      live[0]?.fire()
+      disk.delete(path())
+      await vi.advanceTimersByTimeAsync(1500)
+      expect(got).toEqual([{ kind: 'deleted', path: path() }])
+      disk.set(path(), bytes('alt'))
+      live[1]?.fire()
+      await vi.advanceTimersByTimeAsync(1500)
+      expect(got).toHaveLength(2)
+      expect(got[1]).toMatchObject({ kind: 'changed', note: { text: 'alt' } })
+      w.close()
+    })
+
+    it('reports a restore with different bytes once', async () => {
+      const w = setup()
+      await writeFile(path(), 'alt')
+      w.setFiles([path()])
+      live[0]?.fire()
+      disk.delete(path())
+      await vi.advanceTimersByTimeAsync(1500)
+      disk.set(path(), bytes('anders'))
+      live[1]?.fire()
+      await vi.advanceTimersByTimeAsync(1500)
+      expect(got.map((c) => c.kind)).toEqual(['deleted', 'changed'])
+      w.close()
+    })
+
+    it('stays silent for our own recreation after the folder came back', async () => {
+      const w = setup()
+      await writeFile(path(), 'alt')
+      w.setFiles([path()])
+      live[0]?.fire()
+      disk.delete(path())
+      await vi.advanceTimersByTimeAsync(1500)
+      w.expect(path(), hashBytes(bytes('neu')))
+      disk.set(path(), bytes('neu'))
+      live[1]?.fire()
+      await vi.advanceTimersByTimeAsync(1500)
+      expect(got.map((c) => c.kind)).toEqual(['deleted'])
+      w.close()
+    })
+
+    it('never calls onChange for an in-flight check after close()', async () => {
+      disk = new Map()
+      got = []
+      let release: (b: Buffer) => void = () => {}
+      const w = new NoteWatcher(
+        (c) => got.push(c),
+        100,
+        () => new Promise<Buffer>((r) => (release = r)),
+        { watch: fakeWatch(0) },
+      )
+      await writeFile(path(), 'alt')
+      w.setFiles([path()])
+      live[0]?.listener('change', 'n.md')
+      await vi.advanceTimersByTimeAsync(100)
+      w.close()
+      release(bytes('spaet'))
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(got).toEqual([])
+    })
   })
 })

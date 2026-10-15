@@ -32,6 +32,7 @@ export class NoteWatcher {
     { timer: ReturnType<typeof setTimeout>; attempt: number }
   >()
   private readonly deps: WatcherDeps
+  private closed = false
 
   constructor(
     private readonly onChange: (change: ExternalChange) => void,
@@ -106,7 +107,7 @@ export class NoteWatcher {
     this.dirs.set(dir, w)
     if (attempt > 0) {
       // Changes during the gap produced no events: look at every file of the folder once.
-      for (const p of this.files) if (dirname(p) === dir) void this.check(p)
+      for (const p of this.files) if (dirname(p) === dir) this.schedule(p, false)
     }
   }
 
@@ -135,6 +136,7 @@ export class NoteWatcher {
   }
 
   close(): void {
+    this.closed = true
     for (const w of this.dirs.values()) w.close()
     this.dirs.clear()
     for (const r of this.retries.values()) this.deps.clearTimeout(r.timer)
@@ -162,16 +164,16 @@ export class NoteWatcher {
 
   /** confirming: the previous check already failed (missing or a transient error). */
   private async check(path: string, confirming = false): Promise<void> {
-    if (!this.files.has(path)) return
+    if (this.closed || !this.files.has(path)) return
     let bytes: Buffer
     try {
       bytes = await this.read(path)
     } catch (err) {
       // The path may have been removed while the read was in flight.
-      if (this.files.has(path)) this.readFailed(path, err, confirming)
+      if (!this.closed && this.files.has(path)) this.readFailed(path, err, confirming)
       return
     }
-    if (!this.files.has(path)) return
+    if (this.closed || !this.files.has(path)) return
     const hash = hashBytes(bytes)
     const entry = this.known.get(path)
     if (!entry?.failure) {
