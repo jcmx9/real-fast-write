@@ -38,10 +38,17 @@ export interface Session {
 
 export type SessionPatch = Partial<Pick<Session, 'tabs' | 'activeIndex' | 'mode' | 'view' | 'zoom'>>
 
+export interface FontStatus {
+  dir: string
+  found: boolean
+  missing: string[]
+}
+
 export interface StartupState {
   session: Session
   openPaths: string[]
   settings: Settings
+  fonts: FontStatus
 }
 
 export type SaveResult = { ok: true; hash: string } | { ok: false; error: string }

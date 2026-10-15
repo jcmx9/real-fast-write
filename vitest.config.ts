@@ -11,6 +11,7 @@ export default defineConfig({
       // Electron/DOM wiring is covered by the Playwright suite.
       exclude: [
         'src/main/index.ts',
+        'src/main/font-protocol.ts',
         'src/main/context.ts',
         'src/main/ipc.ts',
         'src/main/window.ts',
