@@ -11,6 +11,7 @@ import { rfHighlight } from './highlight'
 import { modeCompartment, modeExtensions } from './mode'
 import { previewPlugin } from './preview'
 import { foldAllSections } from './sections'
+import { snippetExtensions } from './snippets'
 import { tableField } from './tables'
 
 export const viewCompartment = new Compartment()
@@ -57,6 +58,7 @@ export function createState(
       history(),
       drawSelection(),
       codeFolding(),
+      snippetExtensions,
       keymap.of([...foldBindings(), ...defaultKeymap, ...historyKeymap, indentWithTab]),
       markdown({ base: markdownLanguage, codeLanguages: languages, extensions: [Frontmatter] }),
       rfHighlight,
