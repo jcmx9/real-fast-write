@@ -57,6 +57,23 @@ test('opens one tab for a note given via a symlinked folder and its real path', 
   await app.close()
 })
 
+test('a note opened via a symlinked file is identified by its target', async () => {
+  const dirs = await makeDirs()
+  const target = join(dirs.notes, 'ziel.md')
+  await writeFile(target, 'ziel')
+  const link = join(dirs.notes, 'verweis.md')
+  try {
+    await symlink(target, link, 'file')
+  } catch {
+    // File symlinks need admin rights or developer mode on Windows.
+    test.skip(true, 'file symlinks not permitted here')
+  }
+  const { app, page } = await launch({ dirs, args: [link, target] })
+  await expect(tabs(page).first()).toContainText('ziel.md')
+  await expect(tabs(page)).toHaveCount(1)
+  await app.close()
+})
+
 test('opens a second tab and switches with the window menu', async () => {
   const { app, page } = await launch()
   await clickMenu(app, 'new')

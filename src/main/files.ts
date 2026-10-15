@@ -43,18 +43,21 @@ export async function exists(path: string): Promise<boolean> {
 /**
  * The one spelling of a path that the allowlist, the watcher, tab identity and the session use.
  * `fs.promises.realpath` is the native realpath: it resolves symlinks and junctions, Windows 8.3
- * names and, on macOS/Windows, the file system's stored case. A missing file (a new note) gets
- * its folder canonicalised; a path in a missing folder is only resolved.
+ * names and, on macOS/Windows, the file system's stored case. A symlinked file resolves to its
+ * target. For a missing path (a new note, maybe in a folder not created yet) the nearest
+ * existing ancestor is canonicalised and the missing rest appended unchanged.
  */
 export async function canonicalPath(path: string): Promise<string> {
   const abs = resolve(path)
-  try {
-    return await fs.realpath(abs)
-  } catch {
+  const rest: string[] = []
+  for (let current = abs; ; ) {
     try {
-      return join(await fs.realpath(dirname(abs)), basename(abs))
+      return join(await fs.realpath(current), ...rest)
     } catch {
-      return abs
+      const parent = dirname(current)
+      if (parent === current) return abs
+      rest.unshift(basename(current))
+      current = parent
     }
   }
 }

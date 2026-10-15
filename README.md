@@ -30,6 +30,8 @@ rf-write --version
 rf-write --help
 ```
 
+Symbolische Links auf einzelne Notizen öffnen die verlinkte Datei (Tab-Name, Umbenennen und Export beziehen sich auf sie); verlinkte Ordner sind davon nicht betroffen.
+
 Der Befehl `rf-write` steht nach der Installation zur Verfügung (ein One-Line-Installer ist geplant); in der Entwicklung startet `npm run dev` die App. Die Einstellungen liegen in `settings.json` im App-Datenordner (macOS `~/Library/Application Support/rf-write`, Windows `%APPDATA%\rf-write`, Linux `~/.config/rf-write`).
 
 Die Preview nutzt die Schriften von rf-document aus dessen Installationsordner und fällt andernfalls auf Systemschriften zurück. Fließtext wird wie im PDF von rf-document im Blocksatz ohne Silbentrennung gesetzt; getrennt wird erst beim Export durch Typst.

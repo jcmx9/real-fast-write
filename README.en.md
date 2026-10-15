@@ -30,6 +30,8 @@ rf-write --version
 rf-write --help
 ```
 
+Symbolic links to single notes open the linked file (tab name, rename and export refer to it); linked folders are not affected.
+
 The `rf-write` command is available after installation (a one-line installer is planned); in development, `npm run dev` starts the app. Settings live in `settings.json` in the app data folder (macOS `~/Library/Application Support/rf-write`, Windows `%APPDATA%\rf-write`, Linux `~/.config/rf-write`).
 
 The preview uses rf-document's fonts from its install folder and otherwise falls back to system fonts. Body text is set justified without hyphenation, like the PDF from rf-document; Typst hyphenates only on export.

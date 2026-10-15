@@ -53,10 +53,10 @@ export function registerIpc(ctx: AppContext): void {
   })
 
   ipcMain.handle(Ch.newNotePath, async () => {
-    // Canonical folder, so candidates compare against the canonical reserved set; the result is
-    // canonicalised again in case the folder was only created (and resolved) by newNotePath.
+    // Canonical folder (also when it does not exist yet), so candidates compare against the
+    // canonical reserved set.
     const dir = await canonicalPath(ctx.settings.defaultFolder)
-    const p = await canonicalPath(await newNotePath(dir, new Date(), ctx.reserved))
+    const p = await newNotePath(dir, new Date(), ctx.reserved)
     ctx.reserved.add(p)
     ctx.allow([p])
     return p
@@ -121,9 +121,14 @@ export function registerIpc(ctx: AppContext): void {
     if (typeof patch === 'object' && patch !== null) await ctx.updateSession(patch as SessionPatch)
   })
 
+  // Each call sends the full list: only the newest one may reach the watcher, even when an
+  // older call's canonicalisation finishes later.
+  let watchGeneration = 0
   ipcMain.handle(Ch.watch, async (_e, paths: unknown) => {
+    const generation = ++watchGeneration
     const list = Array.isArray(paths) ? paths.filter((p): p is string => typeof p === 'string') : []
     const canonical = await canonicalPaths(list)
+    if (generation !== watchGeneration) return
     ctx.watcher.setFiles(canonical.filter((p) => ctx.isAllowed(p)))
   })
 

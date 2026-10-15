@@ -204,9 +204,10 @@ describe('canonicalPath', () => {
     expect(await canonicalPath(join(link, 'neu.md'))).toBe(join(real, 'neu.md'))
   })
 
-  it('resolves a path in a missing folder without touching the disk', async () => {
-    const missing = join(dir, 'fehlt', 'neu.md')
-    expect(await canonicalPath(missing)).toBe(missing)
-    expect(await readdir(dir)).toEqual([])
+  it('canonicalises the nearest existing folder of a path in missing folders', async () => {
+    const { real, link } = await linkedFolder()
+    const missing = join(link, 'fehlt', 'tief', 'neu.md')
+    expect(await canonicalPath(missing)).toBe(join(real, 'fehlt', 'tief', 'neu.md'))
+    expect(await readdir(real)).toEqual([])
   })
 })
