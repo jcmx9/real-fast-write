@@ -26,12 +26,29 @@ const lit = (s: string): string => s.replace(/[{}]/g, (c) => `\\${c}`)
 
 type Token = { kind: 'text'; text: string } | { kind: 'stop'; n: string; def: string | null }
 
+/**
+ * Escape rule (VS Code): `\$` is a literal `$`, `\\` is a literal `\`, and inside a default `\}` is
+ * a literal `}`. Every other backslash stays as written (so `\{` and `\}` in plain text round-trip).
+ */
+const DEFAULT_ESC = /\\([\\$}])|\$(?:\{([A-Z_]+)\}|([A-Z_]+))/g
+
+function expandDefault(raw: string, now: Date): string {
+  return raw.replace(DEFAULT_ESC, (m, esc?: string, braced?: string, bare?: string) =>
+    esc !== undefined ? esc : expandVariables(`$${braced ? `{${braced}}` : bare}`, now) || m,
+  )
+}
+
 /** Splits a body into literal text and tab stops; variables are expanded here. */
 function tokenize(body: string, now: Date): Token[] {
   const tokens: Token[] = []
   let i = 0
   while (i < body.length) {
     const rest = body.slice(i)
+    if (/^\\[$\\]/.test(rest)) {
+      tokens.push({ kind: 'text', text: rest[1] as string })
+      i += 2
+      continue
+    }
     let m = /^\$(\d+)/.exec(rest)
     if (m) {
       tokens.push({ kind: 'stop', n: m[1] as string, def: null })
@@ -50,11 +67,12 @@ function tokenize(body: string, now: Date): Token[] {
       let depth = 1
       let j = i + m[0].length
       for (; j < body.length && depth > 0; j++) {
-        if (body[j] === '{') depth++
+        if (body[j] === '\\' && /[\\$}]/.test(body[j + 1] ?? '')) j++
+        else if (body[j] === '{') depth++
         else if (body[j] === '}') depth--
       }
       if (depth === 0) {
-        const def = expandVariables(body.slice(i + m[0].length, j - 1), now)
+        const def = expandDefault(body.slice(i + m[0].length, j - 1), now)
         tokens.push({ kind: 'stop', n, def })
         i = j
         continue
@@ -91,7 +109,7 @@ export function toCmTemplate(body: string, now: Date): string {
     }
     const def = t.def ?? firstDefault.get(t.n) ?? null
     if (def === null || def === '') out += `\${${t.n}}`
-    else if (/[{}]/.test(def)) out += `${lit(def)}\${${t.n}}`
+    else if (/[{}\n]/.test(def)) out += `${lit(def)}\${${t.n}}`
     else out += `\${${t.n}:${def}}`
   }
   return out

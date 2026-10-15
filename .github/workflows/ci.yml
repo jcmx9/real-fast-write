@@ -33,7 +33,7 @@ jobs:
         with:
           repository: jcmx9/real-fast-document
           path: .rfd
-          sparse-checkout: header.md
+          sparse-checkout: /header.md
           sparse-checkout-cone-mode: false
 
       - run: npm run test:coverage

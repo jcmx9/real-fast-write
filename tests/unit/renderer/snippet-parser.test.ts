@@ -70,6 +70,23 @@ describe('toCmTemplate', () => {
     expect(insert('${1:a{b}c}')).toMatchObject({ text: 'a{b}c', at: 5 })
   })
 
+  it('keeps a multi-line default as text with an empty stop after it', () => {
+    expect(insert('${1:a\nb}')).toMatchObject({ text: 'a\nb', at: 3 })
+  })
+
+  it.each([
+    ['\\$1', '$1'],
+    ['\\${1:x}', '${1:x}'],
+    ['a\\\\b', 'a\\b'],
+    ['\\$CURRENT_YEAR', '$CURRENT_YEAR'],
+  ])('honours the escape in %s', (src, text) => {
+    expect(insert(src).text).toBe(text)
+  })
+
+  it('treats \\} inside a default as a literal brace', () => {
+    expect(insert('${1:a\\}b}')).toMatchObject({ text: 'a}b', at: 3 })
+  })
+
   it('a repeated stop number mirrors the same field', () => {
     expect(insert('${1:x}-$1').text).toBe('x-x')
   })
