@@ -3,6 +3,7 @@ import { Ch } from '../shared/ipc'
 import type { NoteFile, RenameResult, SaveResult, SessionPatch } from '../shared/types'
 import { type AppContext, logSessionError } from './context'
 import { hashBytes, newNotePath, noteBytes, readNote, renameNote, writeNoteBytes } from './files'
+import { loadUserSnippets } from './snippets'
 
 const str = (v: unknown): string => {
   if (typeof v !== 'string') throw new TypeError('Ungültiger Parameter.')
@@ -12,6 +13,7 @@ const message = (err: unknown): string => (err instanceof Error ? err.message : 
 
 export function registerIpc(ctx: AppContext): void {
   ipcMain.handle(Ch.startup, () => ctx.startup())
+  ipcMain.handle(Ch.listSnippets, () => loadUserSnippets(ctx.settings.snippetFolder))
 
   /**
    * The app only leaves a fullscreen it requested itself (FullScreenOwner); returns whether

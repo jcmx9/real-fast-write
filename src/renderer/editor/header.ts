@@ -1,3 +1,4 @@
+import { hasNextSnippetField, hasPrevSnippetField } from '@codemirror/autocomplete'
 import {
   EditorSelection,
   EditorState,
@@ -45,14 +46,22 @@ class TitleBlockWidget extends WidgetType {
   }
 }
 
+/** True while a snippet session (Tab/Shift+Tab between fields) is active. */
+function snippetActive(state: EditorState): boolean {
+  return hasNextSnippetField(state) || hasPrevSnippetField(state)
+}
+
 function build(state: EditorState): DecorationSet {
   const present = state.facet(presentMode)
   if (!present && !state.field(headerHidden, false)) return Decoration.none
   const range = frontmatterRange(state.doc)
   // A header-only note stays open: there is nothing to type into otherwise.
   if (!range || range.to >= state.doc.length) return Decoration.none
-  // Outside Present, a selection on the header (e.g. just retyped) keeps it visible.
-  if (!present && state.selection.ranges.some((r) => r.from <= range.to && r.to >= range.from)) {
+  // A selection on the header keeps it visible: outside Present always (e.g. just retyped),
+  // in Present only while a snippet session has its active field there (e.g. `:meeting`).
+  // An active session's selection always lies in its active field.
+  const onHeader = state.selection.ranges.some((r) => r.from <= range.to && r.to >= range.from)
+  if (onHeader && (!present || snippetActive(state))) {
     return Decoration.none
   }
   return Decoration.set([
@@ -91,6 +100,8 @@ function clampSelection(tr: Transaction): Transaction | readonly (Transaction | 
   const min = Math.min(range.to + 1, tr.newDoc.length)
   const sel = tr.newSelection
   if (sel.ranges.every((r) => r.anchor >= min && r.head >= min)) return tr
+  // Shift+Tab back to a snippet field in the header: the session keeps it open (see build).
+  if (snippetActive(tr.state)) return tr
   const clamp = (r: SelectionRange) =>
     EditorSelection.range(Math.max(r.anchor, min), Math.max(r.head, min))
   const selection = EditorSelection.create(sel.ranges.map(clamp), sel.mainIndex)
@@ -127,7 +138,11 @@ export const headerFold: StateField<DecorationSet> = StateField.define<Decoratio
   update(deco, tr) {
     const flipped = tr.startState.field(headerHidden, false) !== tr.state.field(headerHidden, false)
     const modeFlipped = tr.startState.facet(presentMode) !== tr.state.facet(presentMode)
-    return tr.docChanged || tr.selection || flipped || modeFlipped ? build(tr.state) : deco
+    // Esc ends a snippet session without moving the selection: rebuild so the header collapses.
+    const sessionEnded = snippetActive(tr.startState) !== snippetActive(tr.state)
+    return tr.docChanged || tr.selection || flipped || modeFlipped || sessionEnded
+      ? build(tr.state)
+      : deco
   },
   provide: (f) => [
     EditorView.decorations.from(f),
