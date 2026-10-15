@@ -1,10 +1,10 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
-import { describe, expect, it } from 'vitest'
-import { adHocOptions } from '../../scripts/adhoc-sign.mjs'
+import { describe, expect, it, vi } from 'vitest'
+import { adHocOptions, withRetry } from '../../scripts/adhoc-sign.mjs'
 
-// js-yaml is the parser electron-builder itself uses (a dependency of app-builder-lib), so the
+// js-yaml is the parser electron-builder itself uses (also an explicit devDependency), so the
 // test reads the file exactly as the packager does.
 const require = createRequire(import.meta.url)
 const yaml = require('js-yaml') as { load: (text: string) => unknown }
@@ -108,5 +108,45 @@ describe('adHocOptions (mac.sign hook)', () => {
       identity: '-',
       identityValidation: false,
     })
+  })
+})
+
+describe('withRetry (codesign is flaky on CI runners)', () => {
+  it('retries a failing signature and returns the first success', async () => {
+    const task = vi
+      .fn<() => Promise<string>>()
+      .mockRejectedValueOnce(new Error('resource busy'))
+      .mockRejectedValueOnce(new Error('timed out'))
+      .mockResolvedValue('signed')
+    const log = vi.fn()
+    await expect(withRetry(task, { delayMs: 0, log })).resolves.toBe('signed')
+    expect(task).toHaveBeenCalledTimes(3)
+    expect(log).toHaveBeenCalledTimes(2)
+    expect(log.mock.calls[0]?.[0]).toContain('resource busy')
+  })
+
+  it('gives up after three attempts with the last error', async () => {
+    const task = vi.fn<() => Promise<void>>().mockRejectedValue(new Error('codesign failed'))
+    await expect(withRetry(task, { delayMs: 0, log: () => undefined })).rejects.toThrow(
+      'codesign failed',
+    )
+    expect(task).toHaveBeenCalledTimes(3)
+  })
+
+  it('does not retry a success', async () => {
+    const task = vi.fn<() => Promise<number>>().mockResolvedValue(1)
+    await expect(withRetry(task, { delayMs: 0 })).resolves.toBe(1)
+    expect(task).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('build-time dependencies', () => {
+  it('declares what the sign hook and these tests load instead of relying on hoisting', () => {
+    const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {
+      devDependencies: Record<string, string>
+    }
+    expect(Object.keys(pkg.devDependencies)).toEqual(
+      expect.arrayContaining(['@electron/osx-sign', 'js-yaml']),
+    )
   })
 })

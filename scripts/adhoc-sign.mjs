@@ -16,11 +16,36 @@ export function adHocOptions(opts) {
 }
 
 /**
+ * Runs `task` up to `attempts` times (default 3), waiting `delayMs` × attempt in between.
+ * codesign on CI runners fails now and then (timeouts, "resource busy"). Rethrows the last
+ * error.
+ * @template T
+ * @param {() => Promise<T>} task
+ * @param {{ attempts?: number, delayMs?: number, log?: (message: string) => void }} [o]
+ * @returns {Promise<T>}
+ */
+export async function withRetry(task, o = {}) {
+  const attempts = o.attempts ?? 3
+  const delayMs = o.delayMs ?? 2000
+  const log = o.log ?? ((message) => console.warn(message))
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await task()
+    } catch (err) {
+      if (attempt >= attempts) throw err
+      const reason = err instanceof Error ? err.message : String(err)
+      log(`codesign attempt ${attempt}/${attempts} failed (${reason}); retrying`)
+      await new Promise((resolve) => setTimeout(resolve, delayMs * attempt))
+    }
+  }
+}
+
+/**
  * @param {Record<string, unknown>} opts
  * @returns {Promise<void>}
  */
 export default async function sign(opts) {
-  // @electron/osx-sign is what electron-builder signs with (a dependency of app-builder-lib).
+  // @electron/osx-sign is what electron-builder signs with (also an explicit devDependency).
   const { signAsync } = createRequire(import.meta.url)('@electron/osx-sign')
-  await signAsync(adHocOptions(opts))
+  await withRetry(() => signAsync(adHocOptions(opts)))
 }
