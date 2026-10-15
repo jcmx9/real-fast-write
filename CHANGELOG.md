@@ -6,6 +6,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Insert a page break (`<!-- pagebreak -->`) from the Edit menu or with Mod+Enter
 - Snippets: `:meeting`, `:telefonnotiz`, `:aufgabe`, `:header`, `:newpage` and own `*.tpl.md` templates, triggered with `:`
 - A fold opens when the cursor moves into it
 - Present mode: fullscreen, larger text, title block, info line with clock, tabs, zoom and save state; Esc returns to Edit

@@ -32,6 +32,7 @@ describe('buildMenuTemplate', () => {
     ['undo', 'CmdOrCtrl+Z'],
     ['redo', 'CmdOrCtrl+Shift+Z'],
     ['select-all', 'CmdOrCtrl+A'],
+    ['insert-pagebreak', 'CmdOrCtrl+Enter'],
     ['next-tab', 'Ctrl+Tab'],
     ['prev-tab', 'Ctrl+Shift+Tab'],
     ['toggle-present', 'CmdOrCtrl+Shift+P'],

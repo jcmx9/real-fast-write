@@ -69,6 +69,7 @@ export type MenuCommand =
   | 'undo'
   | 'redo'
   | 'select-all'
+  | 'insert-pagebreak'
   | 'toggle-present'
   | 'toggle-view'
   | 'toggle-header'

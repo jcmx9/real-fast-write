@@ -7,6 +7,7 @@ import type { ExportResult, MenuCommand, Mode, NoteFile, View } from '../shared/
 import { AutosaveScheduler } from './editor/autosave'
 import { headerHidden, headerToggleSpec, moveOutOfHeader } from './editor/header'
 import { modeCompartment, modeExtensions } from './editor/mode'
+import { insertPageBreak } from './editor/pagebreak'
 import { foldAllSections } from './editor/sections'
 import { createState, serializeDoc, viewCompartment, viewExtensions } from './editor/setup'
 import { snippetRegistry } from './editor/snippets'
@@ -182,6 +183,8 @@ export class App {
         return this.editCommand('redo', redo)
       case 'select-all':
         return this.editCommand('selectAll', selectAll)
+      case 'insert-pagebreak':
+        return this.editCommand('insertPageBreak', insertPageBreak)
       case 'toggle-view':
         return this.setView(this.view === 'code' ? 'preview' : 'code')
       case 'toggle-header':
@@ -216,14 +219,18 @@ export class App {
   }
 
   /** Edit commands go to CodeMirror unless another text field (dialog, panel) has focus. */
-  private editCommand(name: 'undo' | 'redo' | 'selectAll', run: (v: EditorView) => unknown): void {
+  private editCommand(
+    name: 'undo' | 'redo' | 'selectAll' | 'insertPageBreak',
+    run: (v: EditorView) => unknown,
+  ): void {
     const el = document.activeElement
     const textField =
       el instanceof HTMLInputElement ||
       el instanceof HTMLTextAreaElement ||
       (el instanceof HTMLElement && el.isContentEditable && !this.editor.dom.contains(el))
     if (textField) {
-      document.execCommand(name)
+      // A page break only makes sense in the document; other fields ignore the shortcut.
+      if (name !== 'insertPageBreak') document.execCommand(name)
       return
     }
     run(this.editor)

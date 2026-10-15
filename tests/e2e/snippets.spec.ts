@@ -1,7 +1,7 @@
 import { mkdir, readdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
-import { clickMenu, launch, makeDirs, waitForFile } from './helpers'
+import { clickMenu, launch, MOD, makeDirs, waitForFile } from './helpers'
 
 const today = () => {
   const d = new Date()
@@ -187,5 +187,28 @@ test('switching tabs closes an open snippet list', async () => {
   await expect(active).toHaveText(name ?? '')
   await page.waitForTimeout(300)
   await expect(popup(page)).toHaveCount(0)
+  await app.close()
+})
+
+test('page break from the menu and with Mod+Enter inserts exactly one', async () => {
+  const dirs = await makeDirs()
+  const path = join(dirs.notes, 'PB.md')
+  await writeFile(path, 'Alpha\n\nBeta\n')
+  const { app, page } = await launch({ dirs, args: [path] })
+  await page.locator('.cm-content').click()
+  await page.keyboard.press(`${MOD}+Home`)
+  await page.keyboard.press('End')
+  await clickMenu(app, 'insert-pagebreak')
+  const first = await waitForFile(path, (b) => b.toString('utf8').includes('<!-- pagebreak -->'))
+  expect(first.toString('utf8')).toBe('Alpha\n\n<!-- pagebreak -->\n\nBeta\n')
+  await page.keyboard.press(`${MOD}+End`)
+  await page.keyboard.press(`${MOD}+Enter`)
+  const second = await waitForFile(
+    path,
+    (b) => (b.toString('utf8').match(/<!-- pagebreak -->/g) ?? []).length === 2,
+  )
+  expect(second.toString('utf8')).toBe(
+    'Alpha\n\n<!-- pagebreak -->\n\nBeta\n\n<!-- pagebreak -->\n',
+  )
   await app.close()
 })

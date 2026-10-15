@@ -46,6 +46,7 @@ The preview uses rf-document's fonts from its install folder and otherwise falls
 | macOS Cmd+Alt+[ / ], otherwise Ctrl+Shift+[ / ] | Fold/unfold section |
 | macOS Ctrl+Alt+[ / ], otherwise Alt+0 / Alt+Shift+0 | Fold/unfold all sections |
 | Mod+Shift+P, Esc | Toggle presentation (fullscreen, text and info line only) |
+| Mod+Enter | Insert a page break (`<!-- pagebreak -->`, as in rf-document) |
 | Mod+Plus / Mod+- / Mod+0 | Zoom in / out / reset (stored per mode) |
 | Ctrl+Tab / Ctrl+Shift+Tab, Mod+1…9 | Switch tabs |
 | Mod+Z / Mod+Shift+Z, Mod+X/C/V, Mod+A | Undo/Redo, Cut/Copy/Paste, Select all |

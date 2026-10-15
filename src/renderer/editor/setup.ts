@@ -9,6 +9,7 @@ import { Frontmatter, frontmatterRange } from './frontmatter'
 import { headerFold, headerHidden } from './header'
 import { rfHighlight } from './highlight'
 import { modeCompartment, modeExtensions } from './mode'
+import { pageBreakKeymap } from './pagebreak'
 import { previewPlugin } from './preview'
 import { foldAllSections, unfoldOnCursor } from './sections'
 import { snippetExtensions } from './snippets'
@@ -59,6 +60,7 @@ export function createState(
       drawSelection(),
       codeFolding(),
       snippetExtensions,
+      pageBreakKeymap,
       unfoldOnCursor,
       keymap.of([...foldBindings(), ...defaultKeymap, ...historyKeymap, indentWithTab]),
       markdown({ base: markdownLanguage, codeLanguages: languages, extensions: [Frontmatter] }),
