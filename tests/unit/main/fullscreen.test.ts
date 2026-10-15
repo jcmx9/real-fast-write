@@ -205,6 +205,36 @@ describe('setWindowFullScreen: refused enter', () => {
     expect(win.calls).toEqual([])
   })
 
+  it('settles at once when the enter takes effect synchronously (Windows)', async () => {
+    const o = new FullScreenOwner()
+    const refused = vi.fn()
+    // Electron on Windows emits 'enter-full-screen' inside setFullScreen(true).
+    const win: FullScreenWindow = {
+      full: false,
+      isFullScreen() {
+        return this.full
+      },
+      setFullScreen(on: boolean) {
+        this.full = on
+        if (on) o.onEnter()
+      },
+    } as FullScreenWindow & { full: boolean }
+    let settled = false
+    const done = setWindowFullScreen(o, win, true, refused).then(() => {
+      settled = true
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(settled).toBe(true)
+    await done
+    await vi.advanceTimersByTimeAsync(REFUSED_MS * 2)
+    expect(refused).not.toHaveBeenCalled()
+    expect(o.request(false, true)).toEqual({ set: false, was: false })
+  })
+
+  it('waits 4 s before calling an enter refused (slow WMs, Space switches)', () => {
+    expect(REFUSED_MS).toBe(4000)
+  })
+
   it('dispose cancels a pending refusal', async () => {
     const o = new FullScreenOwner()
     const refused = vi.fn()

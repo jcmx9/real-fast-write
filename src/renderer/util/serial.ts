@@ -36,6 +36,11 @@ export class LatestToggle {
     private readonly apply: (on: boolean) => Promise<void>,
   ) {}
 
+  /** The state a toggle during the running switch still wants; null when none is pending. */
+  get pendingWant(): boolean | null {
+    return this.running ? this.wanted : null
+  }
+
   /** Settles when this toggle (and any toggles coalesced into it) has been applied. */
   async toggle(): Promise<void> {
     if (this.running) {

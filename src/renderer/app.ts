@@ -156,8 +156,9 @@ export class App {
       if (this.mode === 'present') void this.exitPresent(false)
     })
     this.rfw.onFullScreenRefused(() => {
-      // A meeting must not lose Present because the OS refused fullscreen.
-      if (this.mode === 'present')
+      // A meeting must not lose Present because the OS refused fullscreen. No notice when a
+      // toggle during the refused enter already asked to leave Present (it ends right after).
+      if (this.mode === 'present' && this.presentToggle.pendingWant !== false)
         this.notices.toast('Vollbild nicht verfügbar – Präsentation im Fenster')
     })
     root.empty

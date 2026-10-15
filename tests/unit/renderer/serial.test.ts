@@ -117,6 +117,19 @@ describe('LatestToggle', () => {
     expect(s.applied).toEqual([true])
   })
 
+  it('exposes the state a coalesced toggle still wants (null when none)', async () => {
+    const s = setup()
+    const done = s.t.toggle()
+    expect(s.t.pendingWant).toBeNull()
+    void s.t.toggle()
+    expect(s.t.pendingWant).toBe(false)
+    void s.t.toggle()
+    expect(s.t.pendingWant).toBe(true)
+    await s.release()
+    await done
+    expect(s.t.pendingWant).toBeNull()
+  })
+
   it('a failing request does not block later toggles', async () => {
     let calls = 0
     const t = new LatestToggle(

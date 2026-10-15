@@ -28,6 +28,8 @@ const INPUT_FRESH_MS = 500
 export interface KeyInput {
   type: string
   key: string
+  /** Physical key; 'KeyP' also on layouts where P types another letter (e.g. Cyrillic). */
+  code: string
   isAutoRepeat: boolean
   shift: boolean
   control: boolean
@@ -59,7 +61,8 @@ export class PresentKeyGuard {
 
   /** Feed every before-input-event. A keyUp needs no handling: a new press is not a repeat. */
   onInput(i: KeyInput): void {
-    if (i.type !== 'keyDown' || i.key.toLowerCase() !== 'p' || !i.shift || i.alt) return
+    const isP = i.key.toLowerCase() === 'p' || i.code === 'KeyP'
+    if (i.type !== 'keyDown' || !isP || !i.shift || i.alt) return
     if (this.mac ? !i.meta : !i.control) return
     this.seen = { repeat: i.isAutoRepeat, at: this.now() }
   }

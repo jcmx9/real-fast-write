@@ -159,6 +159,7 @@ describe('PresentKeyGuard', () => {
   const input = (over: Partial<Parameters<PresentKeyGuard['onInput']>[0]> = {}) => ({
     type: 'keyDown',
     key: 'P',
+    code: 'KeyP',
     isAutoRepeat: false,
     shift: true,
     control: false,
@@ -234,7 +235,7 @@ describe('PresentKeyGuard', () => {
     // Not the shortcut (Alt held, other key): no input info for the accelerator clicks.
     s.keyDown(true, { alt: true })
     s.wait(1000)
-    s.keyDown(true, { key: 'o' })
+    s.keyDown(true, { key: 'o', code: 'KeyO' })
     expect(s.d.command).toHaveBeenCalledTimes(2)
     s.wait(40)
     s.accel() // no input observed, 40 ms after the last press: fallback treats it as repeat
@@ -242,6 +243,15 @@ describe('PresentKeyGuard', () => {
     s.wait(300)
     s.accel()
     expect(s.d.command).toHaveBeenCalledTimes(3)
+  })
+
+  it('matches the physical P key on non-Latin layouts (key is not p)', () => {
+    const s = setup(false)
+    const cyrillic = { key: 'З', code: 'KeyP', meta: false, control: true }
+    s.keyDown(false, cyrillic)
+    s.wait(600) // past the fallback window: only the repeat flag can tell
+    s.keyDown(true, cyrillic)
+    expect(s.d.command).toHaveBeenCalledTimes(1)
   })
 
   it('input seen long before a click is stale and not used', () => {

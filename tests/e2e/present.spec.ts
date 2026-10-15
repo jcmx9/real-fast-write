@@ -273,7 +273,7 @@ test('a refused fullscreen keeps Present running windowed, with a notice', async
   await expect(page.locator('body.rf-mode-present')).toHaveCount(1)
   await expect(page.locator('.toast')).toContainText(
     'Vollbild nicht verfügbar – Präsentation im Fenster',
-    { timeout: 5000 },
+    { timeout: 8000 },
   )
   await expect(page.locator('body.rf-mode-present')).toHaveCount(1)
   expect(await fullScreen(app)).toBe(false)
@@ -289,17 +289,31 @@ test('a toggle during an in-flight fullscreen request is applied afterwards (las
   const { app, page } = await openFixture()
   // A never-entering window keeps the enter request in flight for the refusal timeout.
   await refuseFullScreen(app)
+  // Records every toast ever shown: a toast removes itself after 4 s, so a later count of 0
+  // would not prove that none appeared.
+  await page.evaluate(() => {
+    const seen: string[] = []
+    Object.assign(window, { seenToasts: seen })
+    new MutationObserver((records) => {
+      for (const r of records)
+        for (const n of r.addedNodes)
+          if (n instanceof HTMLElement && n.classList.contains('toast'))
+            seen.push(n.textContent ?? '')
+    }).observe(document.body, { childList: true, subtree: true })
+  })
+  const toasts = () =>
+    page.evaluate(() => (window as unknown as { seenToasts: string[] }).seenToasts.slice())
   await clickMenu(app, 'toggle-present')
   await expect(page.locator('body.rf-mode-present')).toHaveCount(1)
   await clickMenu(app, 'toggle-present') // during the in-flight enter: remembered
-  await expect(page.locator('body.rf-mode-present')).toHaveCount(0, { timeout: 5000 })
-  // No refusal notice: Present had already ended when the enter was refused.
-  await expect(page.locator('.toast')).toHaveCount(0)
+  await expect(page.locator('body.rf-mode-present')).toHaveCount(0, { timeout: 8000 })
+  // No refusal notice: the pending toggle already wanted Edit when the enter was refused.
+  expect(await toasts()).toEqual([])
   // An even number of extra toggles is a no-op: Present stays.
   await clickMenu(app, 'toggle-present')
   await clickMenu(app, 'toggle-present')
   await clickMenu(app, 'toggle-present')
-  await page.waitForTimeout(2500) // deliberately past the refusal timeout
+  await page.waitForTimeout(4500) // deliberately past the refusal timeout
   await expect(page.locator('body.rf-mode-present')).toHaveCount(1)
   await app.close()
 })

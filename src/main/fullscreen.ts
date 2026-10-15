@@ -7,8 +7,9 @@ export interface FullScreenAction {
 }
 
 /** An app-requested enter that has neither fired 'enter-full-screen' nor shows up in
- * isFullScreen() by then counts as refused by the OS. */
-export const REFUSED_MS = 2000
+ * isFullScreen() by then counts as refused by the OS. Generous, so a slow Linux WM or a macOS
+ * Space switch under load does not get a false „Vollbild nicht verfügbar“. */
+export const REFUSED_MS = 4000
 /** How long after a refusal a late 'enter-full-screen' is still taken as the app's own. */
 export const LATE_ENTER_MS = 10_000
 
@@ -145,7 +146,14 @@ export async function setWindowFullScreen(
 ): Promise<boolean> {
   const action = owner.request(on, win.isFullScreen())
   if (action.set === null) return action.was
-  win.setFullScreen(action.set)
-  if (action.set) await owner.awaitEnter(() => win.isFullScreen(), onRefused)
+  if (!action.set) {
+    win.setFullScreen(false)
+    return action.was
+  }
+  // Wait before the call: on Windows 'enter-full-screen' fires synchronously inside
+  // setFullScreen(true) and must settle this enter, not leave it in flight until REFUSED_MS.
+  const entered = owner.awaitEnter(() => win.isFullScreen(), onRefused)
+  win.setFullScreen(true)
+  await entered
   return action.was
 }
