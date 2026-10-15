@@ -11,3 +11,7 @@ Thumbs.db
 .vscode/
 .idea/
 .rfd/
+
+# Internal working documents (never published)
+PROMPT.md
+docs/superpowers/
