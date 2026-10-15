@@ -201,6 +201,8 @@ describe('Outline in-place updates', () => {
     outline.render(t, t[0] ?? null)
     expect(labels()[0]?.classList.contains('active')).toBe(true)
     expect(scroll).toHaveBeenCalledTimes(1)
+    // The label, not the H1 item with its whole child list.
+    expect(scroll.mock.contexts[0]).toBe(labels()[0])
     outline.render(t, t[0] ?? null)
     expect(scroll).toHaveBeenCalledTimes(1)
     outline.render(t, t[0]?.children[0] ?? null)

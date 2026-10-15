@@ -171,6 +171,9 @@ dialog.prompt input:focus-visible {
   max-width: 33vw;
   overflow-y: auto;
   overflow-x: hidden;
+  /* A classic (Windows/Linux) scrollbar keeps its room, so the bar does not change width
+     when the outline starts to scroll. */
+  scrollbar-gutter: stable;
   border-left: 1px solid var(--line);
   padding: 8px 4px;
   background: var(--chrome-bg);

@@ -80,7 +80,7 @@ export class Outline {
     const row = key ? (this.rows.get(key) ?? null) : null
     this.activeRow?.label.classList.remove('active')
     row?.label.classList.add('active')
-    if (row && key !== this.activeKey) row.li.scrollIntoView({ block: 'nearest' })
+    if (row && key !== this.activeKey) row.label.scrollIntoView({ block: 'nearest' })
     this.activeRow = row
     this.activeKey = row ? key : null
   }
