@@ -76,11 +76,15 @@ describe('buildMenuTemplate', () => {
     expect(has(false)).toBe(false)
   })
 
-  it('uses Ctrl+Shift+[ / ] for folding on Windows and Linux', () => {
+  it('uses Ctrl+Shift+[ / ] and Alt+0 / Alt+Shift+0 for folding on Windows and Linux', () => {
     for (const platform of ['win32', 'linux'] as const) {
       const items = flatten(buildMenuTemplate(deps({ platform })))
       expect(items.find((i) => i.id === 'fold')?.accelerator).toBe('Ctrl+Shift+[')
       expect(items.find((i) => i.id === 'unfold')?.accelerator).toBe('Ctrl+Shift+]')
+      // Ctrl+Alt is AltGr there: it must stay free for typing [ and ].
+      expect(items.find((i) => i.id === 'fold-all')?.accelerator).toBe('Alt+0')
+      expect(items.find((i) => i.id === 'unfold-all')?.accelerator).toBe('Alt+Shift+0')
+      expect(items.some((i) => String(i.accelerator ?? '').startsWith('Ctrl+Alt+'))).toBe(false)
     }
   })
 

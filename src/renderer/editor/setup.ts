@@ -1,17 +1,34 @@
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
-import { codeFolding, foldGutter, foldKeymap } from '@codemirror/language'
+import { codeFolding, foldGutter, foldKeymap, unfoldAll } from '@codemirror/language'
 import { languages } from '@codemirror/language-data'
 import { Compartment, EditorState, type Extension, type Text } from '@codemirror/state'
-import { drawSelection, EditorView, keymap, lineNumbers } from '@codemirror/view'
+import { drawSelection, EditorView, type KeyBinding, keymap, lineNumbers } from '@codemirror/view'
 import type { Eol, View } from '../../shared/types'
 import { Frontmatter, frontmatterRange } from './frontmatter'
 import { headerFold, headerHidden } from './header'
 import { rfHighlight } from './highlight'
 import { previewPlugin } from './preview'
+import { foldAllSections } from './sections'
 import { tableField } from './tables'
 
 export const viewCompartment = new Compartment()
+
+const isMacPlatform = (): boolean =>
+  typeof navigator !== 'undefined' && navigator.userAgent.includes('Mac')
+
+/**
+ * Fold keys. On Windows/Linux AltGr is Ctrl+Alt, so CodeMirror's `Ctrl-Alt-[`/`]` would swallow
+ * typing `[`/`]` on German layouts: there fold-all is `Alt-0` / `Alt-Shift-0` instead.
+ */
+export function foldBindings(mac = isMacPlatform()): readonly KeyBinding[] {
+  if (mac) return foldKeymap
+  return [
+    ...foldKeymap.filter((b) => b.key !== 'Ctrl-Alt-[' && b.key !== 'Ctrl-Alt-]'),
+    { key: 'Alt-0', run: foldAllSections },
+    { key: 'Alt-Shift-0', run: unfoldAll },
+  ]
+}
 
 export function viewExtensions(view: View): Extension {
   return view === 'code'
@@ -38,7 +55,7 @@ export function createState(
       history(),
       drawSelection(),
       codeFolding(),
-      keymap.of([...foldKeymap, ...defaultKeymap, ...historyKeymap, indentWithTab]),
+      keymap.of([...foldBindings(), ...defaultKeymap, ...historyKeymap, indentWithTab]),
       markdown({ base: markdownLanguage, codeLanguages: languages, extensions: [Frontmatter] }),
       rfHighlight,
       headerHidden.init(() => headerHiddenInit),

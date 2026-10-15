@@ -71,8 +71,9 @@ export function buildMenuTemplate(d: MenuDeps): MenuItemConstructorOptions[] {
       sep,
       item('fold', 'Abschnitt einklappen', `${foldKey}[`),
       item('unfold', 'Abschnitt ausklappen', `${foldKey}]`),
-      item('fold-all', 'Alle einklappen', 'Ctrl+Alt+['),
-      item('unfold-all', 'Alle ausklappen', 'Ctrl+Alt+]'),
+      // Not Ctrl+Alt on Windows/Linux: that is AltGr, which types `[` / `]` on German layouts.
+      item('fold-all', 'Alle einklappen', mac ? 'Ctrl+Alt+[' : 'Alt+0'),
+      item('unfold-all', 'Alle ausklappen', mac ? 'Ctrl+Alt+]' : 'Alt+Shift+0'),
       ...(d.isDev
         ? [
             sep,

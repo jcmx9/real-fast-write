@@ -1,8 +1,11 @@
 // @vitest-environment happy-dom
+import { foldedRanges } from '@codemirror/language'
+import { EditorView } from '@codemirror/view'
 import { describe, expect, it } from 'vitest'
 import { headerHidden } from '../../../src/renderer/editor/header'
 import {
   createState,
+  foldBindings,
   serializeDoc,
   viewCompartment,
   viewExtensions,
@@ -46,5 +49,34 @@ describe('createState wiring', () => {
     expect(createState('---\na: 1\n---\nx', '\n', 'preview', true).selection.main.head).toBe(13)
     expect(createState('---\na: 1\n---\nx', '\n', 'preview', false).selection.main.head).toBe(0)
     expect(createState('x', '\n', 'preview', true).selection.main.head).toBe(0)
+  })
+})
+
+describe('foldBindings', () => {
+  const keys = (mac: boolean) => foldBindings(mac).map((b) => b.key)
+
+  it('keeps CodeMirror fold keys on macOS', () => {
+    expect(keys(true)).toEqual(['Ctrl-Shift-[', 'Ctrl-Shift-]', 'Ctrl-Alt-[', 'Ctrl-Alt-]'])
+  })
+
+  it('frees Ctrl-Alt (AltGr) on Windows/Linux and uses Alt-0 / Alt-Shift-0', () => {
+    expect(keys(false)).toEqual(['Ctrl-Shift-[', 'Ctrl-Shift-]', 'Alt-0', 'Alt-Shift-0'])
+  })
+
+  it('Alt-0 folds every section and Alt-Shift-0 unfolds them', () => {
+    const parent = document.createElement('div')
+    const view = new EditorView({
+      state: createState('# A\n\nx\n\n# B\n\ny', '\n', 'code'),
+      parent,
+    })
+    const run = (key: string) =>
+      foldBindings(false)
+        .find((b) => b.key === key)
+        ?.run?.(view)
+    expect(run('Alt-0')).toBe(true)
+    expect(foldedRanges(view.state).size).toBe(2)
+    expect(run('Alt-Shift-0')).toBe(true)
+    expect(foldedRanges(view.state).size).toBe(0)
+    view.destroy()
   })
 })
