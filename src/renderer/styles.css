@@ -64,9 +64,6 @@ body {
 #editor .cm-editor {
   height: 100%;
 }
-#editor .cm-scroller {
-  font-family: ui-monospace, monospace;
-}
 #empty {
   display: grid;
   place-content: center;

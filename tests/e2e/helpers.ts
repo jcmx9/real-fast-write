@@ -47,7 +47,7 @@ export async function launch(
   const page = await app.firstWindow()
   await page.locator('.cm-editor').waitFor()
   await page.locator('[data-testid=tab]').first().waitFor()
-  return { app, page, ...dirs }
+  return { ...dirs, app, page }
 }
 
 /** Menu accelerators do not fire for synthetic key events, so click the item. */

@@ -62,9 +62,26 @@ export function buildMenuTemplate(d: MenuDeps): MenuItemConstructorOptions[] {
     ],
   }
 
+  const foldKey = mac ? 'Cmd+Alt+' : 'Ctrl+Shift+'
   const view: MenuItemConstructorOptions = {
     label: 'Ansicht',
-    submenu: d.isDev ? [{ role: 'reload' }, { role: 'toggleDevTools' }] : [],
+    submenu: [
+      item('toggle-view', 'Code-Ansicht ein/aus', 'CmdOrCtrl+Shift+M'),
+      item('toggle-header', 'YAML-Header ein/aus', 'CmdOrCtrl+Shift+H'),
+      sep,
+      item('fold', 'Abschnitt einklappen', `${foldKey}[`),
+      item('unfold', 'Abschnitt ausklappen', `${foldKey}]`),
+      // Not Ctrl+Alt on Windows/Linux: that is AltGr, which types `[` / `]` on German layouts.
+      item('fold-all', 'Alle einklappen', mac ? 'Ctrl+Alt+[' : 'Alt+0'),
+      item('unfold-all', 'Alle ausklappen', mac ? 'Ctrl+Alt+]' : 'Alt+Shift+0'),
+      ...(d.isDev
+        ? [
+            sep,
+            { role: 'reload' } as MenuItemConstructorOptions,
+            { role: 'toggleDevTools' } as MenuItemConstructorOptions,
+          ]
+        : []),
+    ],
   }
 
   const window: MenuItemConstructorOptions = {

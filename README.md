@@ -13,7 +13,7 @@
 
 ## Status
 
-In Entwicklung. Vorhanden: Tabs, Autosave mit atomarem Schreiben, Umbenennen, Wiederherstellen der Sitzung, Erkennen externer Änderungen und PDF-Export über rf-document. Noch nicht vorhanden: die PDF-Optik in der Vorschau, der Präsentationsmodus, Snippets und die Installation per Einzeiler.
+In Entwicklung. Vorhanden: Tabs, Autosave mit atomarem Schreiben, Umbenennen, Wiederherstellen der Sitzung, Erkennen externer Änderungen und PDF-Export über rf-document sowie die PDF-Optik in der Vorschau. Noch nicht vorhanden: der Präsentationsmodus, Snippets und die Installation per Einzeiler.
 
 ## Voraussetzungen (Entwicklung)
 
@@ -32,6 +32,8 @@ rf-write --help
 
 Der Befehl `rf-write` steht nach der Installation zur Verfügung (ein One-Line-Installer ist geplant); in der Entwicklung startet `npm run dev` die App. Die Einstellungen liegen in `settings.json` im App-Datenordner (macOS `~/Library/Application Support/rf-write`, Windows `%APPDATA%\rf-write`, Linux `~/.config/rf-write`).
 
+Die Preview nutzt die Schriften von rf-document aus dessen Installationsordner und fällt andernfalls auf Systemschriften zurück.
+
 | Kürzel | Aktion |
 |--------|--------|
 | Mod+N | Neue Notiz im Standardordner (`JJJJ-MM-TT_HH-mm-ss.md`) |
@@ -39,6 +41,10 @@ Der Befehl `rf-write` steht nach der Installation zur Verfügung (ein One-Line-I
 | Mod+Shift+R | Umbenennen |
 | Mod+W | Tab schließen |
 | Mod+E | PDF exportieren |
+| Mod+Shift+M | Code-Ansicht ein/aus (Preview ist Standard) |
+| Mod+Shift+H | YAML-Header in der Preview ein-/ausblenden (ausgeblendet erscheint der Titelblock wie im PDF) |
+| macOS Cmd+Alt+[ / ], sonst Ctrl+Shift+[ / ] | Abschnitt ein-/ausklappen |
+| macOS Ctrl+Alt+[ / ], sonst Alt+0 / Alt+Shift+0 | Alle Abschnitte ein-/ausklappen |
 | Ctrl+Tab / Ctrl+Shift+Tab, Mod+1…9 | Tabs wechseln |
 | Mod+Z / Mod+Shift+Z, Mod+X/C/V, Mod+A | Widerrufen/Wiederholen, Ausschneiden/Kopieren/Einfügen, Alles auswählen |
 

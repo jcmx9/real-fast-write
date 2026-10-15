@@ -4,6 +4,7 @@ import { app, type BrowserWindow, dialog, Menu } from 'electron'
 import { Ch } from '../shared/ipc'
 import type {
   ExportResult,
+  FontStatus,
   MenuCommand,
   Session,
   SessionPatch,
@@ -12,6 +13,7 @@ import type {
 } from '../shared/types'
 import { addRecent, replaceRecent } from './cli'
 import { runRfDocument } from './export'
+import { fontDir, fontStatus } from './fonts'
 import { isExecutableFile, locateRfDocument } from './locate'
 import { buildMenuTemplate } from './menu'
 import {
@@ -33,6 +35,7 @@ export class AppContext {
   window: BrowserWindow | null = null
   settings: Settings
   session: Session = DEFAULT_SESSION
+  fonts: FontStatus = { dir: '', found: false, missing: [] }
   readonly reserved = new Set<string>()
   readonly watcher = new NoteWatcher((note) => this.send(Ch.externalChange, note))
   /** Paths the renderer may read or write: only ones the user opened or rf-write created. */
@@ -56,6 +59,7 @@ export class AppContext {
     this.settings = sanitizeSettings(await loadJson(this.file('settings.json')), this.settings)
     this.session = sanitizeSession(await loadJson(this.file('session.json')))
     this.allow([...this.session.tabs.map((t) => t.path), ...this.session.recent])
+    this.fonts = await fontStatus(fontDir(process.platform, process.env, homedir()))
   }
 
   allow(paths: readonly string[]): void {
@@ -96,7 +100,12 @@ export class AppContext {
 
   startup(): StartupState {
     this.rendererReady = true
-    return { session: this.session, openPaths: this.pending.splice(0), settings: this.settings }
+    return {
+      session: this.session,
+      openPaths: this.pending.splice(0),
+      settings: this.settings,
+      fonts: this.fonts,
+    }
   }
 
   /** Called once settings and IPC handlers are ready; windows may be created from then on. */
