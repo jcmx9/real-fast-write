@@ -75,7 +75,7 @@ Zoom is stored separately for Edit and Present. In Edit, 100 % equals the PDF's 
 - Headings, emphasis, lists, quotes, inline code, links: styled. Their marks (`#`, `**`, `>`, `` ` ``, link URLs) are dimmed or hidden unless the cursor is inside the element.
 - Task items `- [ ]` render as clickable checkboxes. A click changes exactly one character (`[ ]` ↔ `[x]`).
 - Alerts `> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]` and `[!CAUTION]` get a left bar and tinted background in rf-document colors.
-- Tables stay text, styled with zebra striping. There is no table widget.
+- Tables look like the PDF (decided 2026-10-15): a block widget shows real columns, a centred bold head, alignment from the delimiter row (otherwise numbers right-aligned), every second data row striped, vertical rules and a rule under the head. A click on the table, or the cursor entering it, shows the Markdown text for editing. The widget never changes the text.
 - Fenced code blocks get Typst-like syntax colors.
 - Hyphenation is not required, because Typst hyphenates in the PDF. Body text is justified if `hyphens: auto` works for `lang="de"` in Electron, otherwise flush-left. Headings are always flush-left.
 - **Theme values:** all sizes, spacings, colors and font features come from `zettlr_rfdoc-Export/zettlr/rfdoc-zettlr.css`. They become CSS custom properties in `src/renderer/theme.css`, which names rf-document's `template.typ` as its source of truth. Only the values are ported. Zettlr's selectors (`.cm-header-1`, `.rendered-bullet`, …) do not apply.
@@ -83,7 +83,7 @@ Zoom is stored separately for Edit and Present. In Edit, 100 % equals the PDF's 
 
 ### YAML header toggle (Edit/Preview)
 
-- A replace decoration collapses the front matter to one muted line, `⋯ <title>`, or `⋯ Header` if there is no title.
+- A replace decoration collapses the front matter into rf-document's title block (decided 2026-10-15). It shows the client (small capitals), the title, the subtitle and "date · author", each only when set and with dates formatted like the PDF. Without any of these fields it shows a muted `⋯ YAML-Header` line.
 - `atomicRanges` makes the cursor skip the collapsed block.
 - If the cursor is inside the header when it collapses, it moves to the first position after the header.
 - The state is kept per tab and persisted with the session.
