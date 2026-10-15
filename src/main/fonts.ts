@@ -27,12 +27,12 @@ export function fontDir(
   if (env.RFD_HOME) return p.join(env.RFD_HOME, 'fonts')
   if (platform === 'win32') {
     return p.join(
-      env.LOCALAPPDATA ?? p.join(home, 'AppData', 'Local'),
+      env.LOCALAPPDATA || p.join(home, 'AppData', 'Local'),
       'real-fast-document',
       'fonts',
     )
   }
-  return p.join(env.XDG_DATA_HOME ?? p.join(home, '.local', 'share'), 'real-fast-document', 'fonts')
+  return p.join(env.XDG_DATA_HOME || p.join(home, '.local', 'share'), 'real-fast-document', 'fonts')
 }
 
 /** Only whitelisted file names are served; anything else (paths, traversal) is refused. */

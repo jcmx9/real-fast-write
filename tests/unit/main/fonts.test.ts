@@ -18,6 +18,15 @@ describe('fontDir', () => {
     expect(fontDir('linux', { XDG_DATA_HOME: '/x' }, '/home/u')).toBe('/x/real-fast-document/fonts')
     expect(fontDir('darwin', {}, '/Users/u')).toBe('/Users/u/.local/share/real-fast-document/fonts')
   })
+  it('treats empty variables as unset and honours RFD_HOME on Windows', () => {
+    expect(fontDir('linux', { XDG_DATA_HOME: '' }, '/home/u')).toBe(
+      '/home/u/.local/share/real-fast-document/fonts',
+    )
+    expect(fontDir('win32', { LOCALAPPDATA: '' }, 'C:\\Users\\u')).toBe(
+      'C:\\Users\\u\\AppData\\Local\\real-fast-document\\fonts',
+    )
+    expect(fontDir('win32', { RFD_HOME: 'D:\\rfd' }, 'C:\\Users\\u')).toBe('D:\\rfd\\fonts')
+  })
   it('uses LOCALAPPDATA on Windows', () => {
     expect(fontDir('win32', { LOCALAPPDATA: 'C:\\Users\\u\\AppData\\Local' }, 'C:\\Users\\u')).toBe(
       'C:\\Users\\u\\AppData\\Local\\real-fast-document\\fonts',

@@ -22,7 +22,9 @@ export function handleFontProtocol(dir: string): void {
     try {
       const data = await fs.readFile(file)
       const type = file.endsWith('.ttf') ? 'font/ttf' : 'font/otf'
-      return new Response(data, { headers: { 'content-type': type } })
+      return new Response(data, {
+        headers: { 'content-type': type, 'access-control-allow-origin': '*' },
+      })
     } catch {
       return new Response('not found', { status: 404 })
     }
