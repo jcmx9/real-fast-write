@@ -169,7 +169,11 @@ class TaskWidget extends WidgetType {
     box.className = 'rf-task'
     box.checked = this.checked
     box.setAttribute('aria-label', this.checked ? 'Erledigt' : 'Offen')
+    box.tabIndex = -1
+    // The document is the source of truth: never let the browser toggle the DOM itself.
+    box.addEventListener('click', (e) => e.preventDefault())
     box.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return
       e.preventDefault()
       // Position looked up at click time, so a reused widget never edits a stale offset.
       const spec = toggleTaskAt(view.state, view.posAtDOM(box))
@@ -263,7 +267,9 @@ export function visitBlock(cx: PreviewCx, ref: SyntaxNodeRef): boolean | undefin
     case 'FencedCode': {
       const firstLine = doc.lineAt(ref.from)
       const lastLine = doc.lineAt(ref.to)
-      const closed = lastLine.number > firstLine.number && /^\s*(```|~~~)/.test(lastLine.text)
+      const closed =
+        lastLine.number > firstLine.number &&
+        ref.node.getChildren('CodeMark').some((m) => m.from >= lastLine.from)
       for (let n = firstLine.number; n <= lastLine.number; n++) {
         const l = doc.line(n)
         const fence = n === firstLine.number || (closed && n === lastLine.number)
@@ -328,6 +334,12 @@ export function buildPreview(
         const prior = seen.get(key)
         if (prior !== undefined) return prior ? undefined : false
         let skip = false
+        // A widget already replaces this whole line: no decorations inside it.
+        const startLine = state.doc.lineAt(ref.from)
+        if (cx.replacedLines.has(startLine.from) && ref.to <= startLine.to) {
+          seen.set(key, false)
+          return false
+        }
         for (const h of handlers) {
           if (h(cx, ref) === false) skip = true
         }
