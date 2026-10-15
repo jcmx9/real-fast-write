@@ -97,8 +97,29 @@ dialog.prompt button[type="submit"] {
 #status .export:hover:not(:disabled, .busy),
 #empty [data-action="new"]:hover:not(:disabled),
 dialog.prompt button[type="submit"]:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--accent);
+}
+#status .export:active:not(:disabled, .busy),
+#empty [data-action="new"]:active:not(:disabled),
+dialog.prompt button[type="submit"]:active:not(:disabled) {
   background: var(--accent);
   color: #fff;
+}
+dialog.prompt input {
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font: inherit;
+}
+dialog.prompt input:focus,
+dialog.prompt input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+  border-color: var(--accent);
+}
+#empty button {
+  min-width: 12em;
 }
 #workspace {
   position: relative;
@@ -135,6 +156,7 @@ dialog.prompt button[type="submit"]:hover:not(:disabled) {
 #empty {
   display: grid;
   place-content: center;
+  justify-items: center;
   gap: 8px;
   height: 100%;
 }
