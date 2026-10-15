@@ -25,7 +25,7 @@ import { InfoLine } from './ui/infoline'
 import { Notices } from './ui/notices'
 import { Outline } from './ui/outline'
 import { askText } from './ui/prompt'
-import { SAVE_STATE_LABEL, type SaveState, StatusLine } from './ui/statusline'
+import { type SaveState, StatusLine, saveText } from './ui/statusline'
 import { TabBar } from './ui/tabbar'
 import { editorSizes, handleZoomKey, zoomIn, zoomOut } from './ui/zoom'
 import { fileName } from './util/path'
@@ -85,6 +85,10 @@ export class App {
   private readonly conflicts = new Set<number>()
   /** Tabs whose content is not on disk although clean (file deleted or made unreadable outside). */
   private readonly unwritten = new Set<number>()
+  /** Status warning of a tab held because its file was deleted or became unreadable. */
+  private readonly holdWarnings = new Map<number, string>()
+  /** Hash of the bytes each tab last loaded or saved, to recognise our own content on disk. */
+  private readonly savedHashes = new Map<number, string>()
   private readonly saving = new Map<number, Promise<boolean>>()
   private sessionTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -344,7 +348,7 @@ export class App {
       this.notices.panel('Nicht geöffnet', `${path}\n\n${res.error}`)
       return false
     }
-    this.store.add({
+    const tab = this.store.add({
       path,
       state: createState(res.text, res.eol, this.effectiveView(), hideHeader, this.mode),
       bom: res.bom,
@@ -352,6 +356,7 @@ export class App {
       onDisk: true,
       headerHidden: hideHeader,
     })
+    this.savedHashes.set(tab.id, res.hash)
     return true
   }
 
@@ -491,6 +496,8 @@ export class App {
     this.saveErrors.delete(id)
     this.conflicts.delete(id)
     this.unwritten.delete(id)
+    this.holdWarnings.delete(id)
+    this.savedHashes.delete(id)
     this.saving.delete(id)
     // Present never shows the empty state.
     if (this.mode === 'present' && this.store.all.length === 0) await this.exitPresent()
@@ -598,6 +605,7 @@ export class App {
     }
     const firstSave = !tab.onDisk
     this.store.markSaved(tab.id, doc)
+    this.savedHashes.set(tab.id, res.hash)
     this.unwritten.delete(tab.id)
     this.saveErrors.delete(tab.id)
     if (firstSave) this.syncMain()
@@ -646,8 +654,20 @@ export class App {
     const note = change.note
     const tab = this.store.findByPath(note.path)
     if (!tab) return
+    if (note.hash === this.savedHashes.get(tab.id)) {
+      // Our own last saved bytes are back (after a deletion or a read error): nothing changed
+      // externally, so only lift the hold; unsaved typing is autosaved as usual.
+      if (this.unwritten.delete(tab.id)) {
+        this.clearConflict(tab.id)
+        this.notices.dismiss(note.path)
+        this.refresh()
+        this.autosave.touch()
+      }
+      return
+    }
     // Readable content is back on disk: the normal conflict/reload logic replaces any hold.
     this.unwritten.delete(tab.id)
+    this.holdWarnings.delete(tab.id)
     if (!this.store.isDirty(tab)) {
       this.notices.dismiss(note.path)
       this.clearConflict(tab.id)
@@ -688,15 +708,19 @@ export class App {
       message = `„${name}“ wurde außerhalb gelöscht.`
       saveLabel = 'Erneut speichern'
     } else {
-      message =
-        change.reason === 'encoding'
-          ? `„${name}“ wurde außerhalb geändert und ist kein gültiges UTF-8. rf-write speichert nicht darüber.`
-          : `„${name}“ wurde außerhalb geändert und kann nicht gelesen werden (${change.message}). rf-write speichert nicht darüber.`
+      if (change.reason === 'encoding') {
+        message = `„${name}“ wurde außerhalb geändert und ist kein gültiges UTF-8. rf-write speichert nicht darüber.`
+      } else {
+        message = `„${name}“ kann nicht mehr gelesen werden. rf-write speichert nicht darüber.`
+        console.error(`${change.path}: ${change.message}`)
+      }
       saveLabel = 'Meine Fassung speichern (überschreiben)'
     }
     this.conflicts.add(tab.id)
     this.unwritten.add(tab.id)
-    this.saveErrors.set(tab.id, change.kind === 'deleted' ? DELETED_ERROR : UNREADABLE_ERROR)
+    const warning = change.kind === 'deleted' ? DELETED_ERROR : UNREADABLE_ERROR
+    this.holdWarnings.set(tab.id, warning)
+    this.saveErrors.set(tab.id, warning)
     this.refresh()
     this.notices.banner(
       message,
@@ -712,10 +736,12 @@ export class App {
         { label: 'Tab schließen', run: () => void this.closeTab(tab.id, true) },
       ],
       change.path,
+      change.kind === 'unreadable' && change.reason === 'error' ? change.message : undefined,
     )
   }
 
   private clearConflict(id: number): void {
+    this.holdWarnings.delete(id)
     this.conflicts.delete(id)
     this.saveErrors.delete(id)
   }
@@ -740,6 +766,7 @@ export class App {
     )
     tab.bom = note.bom
     tab.eol = note.eol
+    this.savedHashes.set(tab.id, note.hash)
     this.unwritten.delete(tab.id)
     this.store.updateState(tab.id, state)
     this.store.markSaved(tab.id, state.doc)
@@ -772,10 +799,12 @@ export class App {
 
   private refresh(): void {
     const tab = this.store.active
-    this.tabBar.render(this.store.all, this.store.activeIndex, (t) => this.store.isDirty(t))
-    const error = tab ? (this.saveErrors.get(tab.id) ?? null) : null
+    this.tabBar.render(this.store.all, this.store.activeIndex, (t) => this.unsaved(t))
+    const hold = tab ? (this.holdWarnings.get(tab.id) ?? null) : null
+    const error = hold ?? (tab ? (this.saveErrors.get(tab.id) ?? null) : null)
     let state: SaveState = 'saved'
-    if (error) state = 'error'
+    if (hold) state = 'held'
+    else if (error) state = 'error'
     else if (tab && this.store.isDirty(tab)) state = 'dirty'
     else if (tab && !tab.onDisk) state = 'new'
     this.status.render(tab ? fileName(tab.path) : null, state, error)
@@ -784,11 +813,9 @@ export class App {
       : 'rf-write'
     if (this.mode === 'present') {
       this.infoLine.render(
-        this.store.all.map((t) => ({ name: fileName(t.path), dirty: this.store.isDirty(t) })),
+        this.store.all.map((t) => ({ name: fileName(t.path), dirty: this.unsaved(t) })),
         this.store.activeIndex,
-        state === 'error' && error
-          ? `${SAVE_STATE_LABEL.error}: ${error}`
-          : SAVE_STATE_LABEL[state],
+        saveText(state, error),
         this.zoom.present,
       )
     }

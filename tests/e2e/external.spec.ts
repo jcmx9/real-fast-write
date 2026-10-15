@@ -1,9 +1,20 @@
-import { access, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, chmod, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
-import { launch, makeDirs, typeInEditor, waitForFile } from './helpers'
+import { clickMenu, launch, makeDirs, typeInEditor, waitForFile } from './helpers'
 
 const tabs = (page: import('@playwright/test').Page) => page.locator('[data-testid=tab]')
+
+const HELD_UNREADABLE =
+  'Nicht gespeichert: Externe Fassung nicht lesbar – bitte im Hinweis entscheiden'
+const HELD_DELETED = 'Nicht gespeichert: Datei außerhalb gelöscht – bitte im Hinweis entscheiden'
+
+/** The hold warning is as prominent as a failed save, clean or dirty. */
+async function expectHeld(page: import('@playwright/test').Page, text: string): Promise<void> {
+  const status = page.getByTestId('status-state')
+  await expect(status).toHaveText(text)
+  await expect(status).toHaveClass(/error/)
+}
 
 async function missing(path: string): Promise<boolean> {
   return access(path).then(
@@ -24,9 +35,10 @@ test('an external non-UTF-8 write holds the tab until the user overwrites it', a
   await expect(banner).toHaveText(
     /„ansi\.md“ wurde außerhalb geändert und ist kein gültiges UTF-8\. rf-write speichert nicht darüber\./,
   )
-  await expect(page.getByTestId('status-state')).toHaveClass(/error/)
+  await expectHeld(page, HELD_UNREADABLE)
   await typeInEditor(page, ' meins')
   await page.waitForTimeout(3000)
+  await expectHeld(page, HELD_UNREADABLE)
   expect((await readFile(file)).equals(ansi)).toBe(true)
   await banner.getByRole('button', { name: 'Meine Fassung speichern (überschreiben)' }).click()
   await waitForFile(file, (b) => b.toString('utf8') === 'alt meins')
@@ -59,8 +71,10 @@ test('a deleted note is only recreated after the user chose to save again', asyn
   await rm(file)
   const banner = page.locator('.banner')
   await expect(banner).toHaveText(/„weg\.md“ wurde außerhalb gelöscht\./)
+  await expectHeld(page, HELD_DELETED)
   await typeInEditor(page, ' noch')
   await page.waitForTimeout(3000)
+  await expectHeld(page, HELD_DELETED)
   expect(await missing(file)).toBe(true)
   await banner.getByRole('button', { name: 'Erneut speichern' }).click()
   await waitForFile(file, (b) => b.toString('utf8') === 'da noch')
@@ -99,5 +113,73 @@ test('a deleted note that reappears outside replaces the hold with a reload', as
   await expect(page.locator('.cm-content')).toContainText('zwei')
   await expect(page.locator('.banner')).toHaveCount(0)
   await expect(page.getByTestId('status-state')).toHaveText('Gespeichert')
+  await app.close()
+})
+
+test('a file that cannot be read gets a calm banner; the raw error is only a tooltip', async () => {
+  test.skip(process.platform === 'win32', 'chmod 000 does not block reading on Windows')
+  const dirs = await makeDirs()
+  const file = join(dirs.notes, 'gesperrt.md')
+  await writeFile(file, 'alt')
+  const { app, page } = await launch({ dirs, args: [file] })
+  await expect(page.locator('.cm-content')).toContainText('alt')
+  try {
+    await writeFile(file, 'neu')
+    await chmod(file, 0o000)
+    const text = page.locator('.banner p')
+    await expect(text).toHaveText(
+      '„gesperrt.md“ kann nicht mehr gelesen werden. rf-write speichert nicht darüber.',
+    )
+    await expect(text).toHaveAttribute('title', /EACCES/)
+    await expectHeld(page, HELD_UNREADABLE)
+    await page.waitForTimeout(1000)
+    await expectHeld(page, HELD_UNREADABLE)
+  } finally {
+    await chmod(file, 0o644)
+  }
+  // Resolve the hold, so closing the app does not wait on the discard dialog.
+  await page.locator('.banner').getByRole('button', { name: 'Tab schließen' }).click()
+  await expect(tabs(page)).toHaveCount(0)
+  await app.close()
+})
+
+test('a deleted note restored with our last saved bytes only lifts the hold', async () => {
+  const dirs = await makeDirs()
+  const file = join(dirs.notes, 'zurueck2.md')
+  await writeFile(file, 'alt')
+  const { app, page } = await launch({ dirs, args: [file] })
+  await expect(page.locator('.cm-content')).toContainText('alt')
+  await rm(file)
+  await expect(page.locator('.banner')).toHaveText(/wurde außerhalb gelöscht/)
+  await typeInEditor(page, ' weiter')
+  await writeFile(file, 'alt')
+  await expect(page.locator('.banner')).toHaveCount(0)
+  await waitForFile(file, (b) => b.toString('utf8') === 'alt weiter')
+  await expect(page.locator('.banner')).toHaveCount(0)
+  await expect(page.getByTestId('status-state')).toHaveText('Gespeichert')
+  await app.close()
+})
+
+test('a held clean tab is marked unsaved in the tab bar and in the Present info line', async () => {
+  const dirs = await makeDirs()
+  const keep = join(dirs.notes, 'bleibt.md')
+  const gone = join(dirs.notes, 'geloescht.md')
+  await writeFile(keep, 'bleibt')
+  await writeFile(gone, 'geloescht')
+  const { app, page } = await launch({ dirs, args: [gone, keep] })
+  await expect(tabs(page)).toHaveCount(2)
+  await rm(gone)
+  await expect(page.locator('.banner')).toHaveText(/wurde außerhalb gelöscht/)
+  await expect(tabs(page).nth(0)).toHaveClass(/dirty/)
+  await expect(tabs(page).nth(1)).not.toHaveClass(/dirty/)
+  await expect(page.getByTestId('status-state')).toHaveText('Gespeichert')
+  await tabs(page).nth(0).click()
+  await expectHeld(page, HELD_DELETED)
+  await clickMenu(app, 'toggle-present')
+  await expect(page.getByTestId('il-tab').nth(0)).toHaveClass(/dirty/)
+  await expect(page.getByTestId('il-tab').nth(1)).not.toHaveClass(/dirty/)
+  // Resolve the hold, so closing the app does not wait on the discard dialog.
+  await page.locator('.banner').getByRole('button', { name: 'Tab schließen' }).click()
+  await expect(page.getByTestId('il-tab')).toHaveCount(1)
   await app.close()
 })

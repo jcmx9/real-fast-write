@@ -4,7 +4,8 @@ import { basename, dirname, join, resolve } from 'node:path'
 import type { Eol, NoteFile } from '../shared/types'
 
 const BOM = '\uFEFF'
-const RETRY_CODES = new Set(['EPERM', 'EBUSY', 'EACCES'])
+/** Codes that are often transient on Windows (AV scanners, sync clients, delete pending). */
+export const RETRY_CODES: ReadonlySet<string> = new Set(['EPERM', 'EBUSY', 'EACCES'])
 const MAX_RETRIES = 5
 const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
 

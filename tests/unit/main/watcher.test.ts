@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -236,5 +236,106 @@ describe('NoteWatcher', () => {
     await waitFor(() => events.length > 0)
     await sleep(400)
     expect(events).toEqual([expect.objectContaining({ kind: 'changed' })])
+  })
+
+  it('re-checks a missing file once before reporting it deleted', async () => {
+    const path = join(dir, 'neu-angelegt.md')
+    await writeFile(path, 'a')
+    watcher.setFiles([path])
+    await sleep(150)
+    await rm(path)
+    // Past the first check (debounce 100 ms) but inside the confirming re-check.
+    await sleep(150)
+    await writeFile(path, 'b')
+    await waitFor(() => events.length > 0)
+    await sleep(400)
+    expect(events).toEqual([expect.objectContaining({ kind: 'changed' })])
+  })
+})
+
+function failingRead(code: string, failures: () => number) {
+  let left = 0
+  let armed = false
+  return {
+    arm(): void {
+      armed = true
+      left = failures()
+    },
+    read: async (p: string): Promise<Buffer> => {
+      if (armed && left > 0) {
+        left--
+        throw Object.assign(new Error(`${code}: simulated, open '${p}'`), { code })
+      }
+      return readFile(p)
+    },
+  }
+}
+
+describe('NoteWatcher read errors', () => {
+  function withRead(read: (p: string) => Promise<Buffer>): void {
+    watcher.close()
+    watcher = new NoteWatcher(
+      (c) => {
+        events.push(c)
+        if (c.kind === 'changed') changes.push(c.note)
+      },
+      100,
+      read,
+    )
+  }
+
+  it.each(['EPERM', 'EBUSY', 'EACCES'])(
+    're-checks a transient %s instead of reporting it',
+    async (code) => {
+      const fake = failingRead(code, () => 1)
+      withRead(fake.read)
+      const path = join(dir, `t-${code}.md`)
+      await writeFile(path, 'x')
+      watcher.setFiles([path])
+      await sleep(150)
+      fake.arm()
+      await writeFile(path, 'neu')
+      await waitFor(() => events.length > 0)
+      await sleep(400)
+      expect(events).toEqual([expect.objectContaining({ kind: 'changed' })])
+    },
+  )
+
+  it('re-checks a transient error on unchanged bytes without any event', async () => {
+    const fake = failingRead('EBUSY', () => 1)
+    withRead(fake.read)
+    const path = join(dir, 'same.md')
+    await writeFile(path, 'x')
+    watcher.setFiles([path])
+    await sleep(150)
+    fake.arm()
+    await writeFile(path, 'x')
+    await sleep(700)
+    expect(events).toEqual([])
+  })
+
+  it('reports a lasting read error once as unreadable/error, then a recovery as changed', async () => {
+    let failing = false
+    withRead(async (p) => {
+      if (failing)
+        throw Object.assign(new Error(`EACCES: permission denied, open '${p}'`), { code: 'EACCES' })
+      return readFile(p)
+    })
+    const path = join(dir, 'gesperrt.md')
+    await writeFile(path, 'x')
+    watcher.setFiles([path])
+    await sleep(150)
+    failing = true
+    await writeFile(path, 'y')
+    await waitFor(() => events.length > 0)
+    await writeFile(path, 'z')
+    await sleep(600)
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({ kind: 'unreadable', path, reason: 'error' })
+    expect((events[0] as { message: string }).message).toContain('EACCES')
+    failing = false
+    await writeFile(path, 'z')
+    await waitFor(() => events.length > 1)
+    expect(events[1]).toMatchObject({ kind: 'changed', note: { text: 'z' } })
   })
 })

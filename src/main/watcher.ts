@@ -1,7 +1,7 @@
 import { type FSWatcher, promises as fs, readFileSync, watch } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import type { ExternalChange, NoteFile } from '../shared/types'
-import { decodeNote, errorCode, hashBytes, NotUtf8Error } from './files'
+import { decodeNote, errorCode, hashBytes, NotUtf8Error, RETRY_CODES } from './files'
 
 interface Known {
   /** Hashes of content that is not reported (own writes, the baseline, reported content). */
@@ -20,6 +20,7 @@ export class NoteWatcher {
   constructor(
     private readonly onChange: (change: ExternalChange) => void,
     private readonly debounceMs = 200,
+    private readonly read: (path: string) => Promise<Buffer> = (path) => fs.readFile(path),
   ) {}
 
   setFiles(paths: readonly string[]): void {
@@ -92,27 +93,27 @@ export class NoteWatcher {
     this.schedule(path, false)
   }
 
-  private schedule(path: string, confirmMissing: boolean): void {
+  private schedule(path: string, confirming: boolean): void {
     const pending = this.timers.get(path)
     if (pending) clearTimeout(pending)
     this.timers.set(
       path,
       setTimeout(() => {
         this.timers.delete(path)
-        void this.check(path, confirmMissing)
+        void this.check(path, confirming)
       }, this.debounceMs),
     )
   }
 
-  /** confirmMissing: the previous check already found the file missing. */
-  private async check(path: string, confirmMissing = false): Promise<void> {
+  /** confirming: the previous check already failed (missing or a transient error). */
+  private async check(path: string, confirming = false): Promise<void> {
     if (!this.files.has(path)) return
     let bytes: Buffer
     try {
-      bytes = await fs.readFile(path)
+      bytes = await this.read(path)
     } catch (err) {
       // The path may have been removed while the read was in flight.
-      if (this.files.has(path)) this.readFailed(path, err, confirmMissing)
+      if (this.files.has(path)) this.readFailed(path, err, confirming)
       return
     }
     if (!this.files.has(path)) return
@@ -140,13 +141,14 @@ export class NoteWatcher {
     this.onChange({ kind: 'changed', note })
   }
 
-  private readFailed(path: string, err: unknown, confirmMissing: boolean): void {
+  private readFailed(path: string, err: unknown, confirming: boolean): void {
     const entry = this.known.get(path)
-    if (errorCode(err) === 'ENOENT') {
+    const code = errorCode(err)
+    if (code === 'ENOENT') {
       if (entry?.failure === 'deleted') return
       // A replace by delete + create (or a rename in flight) looks missing for a moment: check
       // once more after the debounce before calling it deleted.
-      if (!confirmMissing) {
+      if (!confirming) {
         this.schedule(path, true)
         return
       }
@@ -156,6 +158,11 @@ export class NoteWatcher {
       return
     }
     if (entry?.failure === 'error') return
+    // Locks by AV scanners or sync clients and Windows' delete-pending state pass quickly.
+    if (!confirming && code !== undefined && RETRY_CODES.has(code)) {
+      this.schedule(path, true)
+      return
+    }
     this.known.set(path, {
       accepted: entry?.accepted ?? new Set(),
       latest: entry?.latest ?? '',

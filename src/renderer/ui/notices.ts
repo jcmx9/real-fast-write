@@ -50,14 +50,18 @@ export class Notices {
     this.el.append(p)
   }
 
-  /** A banner with the same key replaces the one already shown for that key. */
-  banner(message: string, actions: NoticeAction[], key?: string): void {
+  /**
+   * A banner with the same key replaces the one already shown for that key.
+   * detail: technical text shown as the message's tooltip only.
+   */
+  banner(message: string, actions: NoticeAction[], key?: string, detail?: string): void {
     if (key !== undefined) this.banners.get(key)?.remove()
     const b = document.createElement('div')
     b.className = 'banner'
     b.setAttribute('role', 'alert')
     const text = document.createElement('p')
     text.textContent = message
+    if (detail) text.title = detail
     b.append(
       text,
       ...actions.map((a) =>
