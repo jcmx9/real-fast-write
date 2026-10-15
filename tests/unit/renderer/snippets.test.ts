@@ -9,6 +9,7 @@ import { indentWithTab } from '@codemirror/commands'
 import { EditorState } from '@codemirror/state'
 import { EditorView, runScopeHandlers } from '@codemirror/view'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { headerFold } from '../../../src/renderer/editor/header'
 import { createState } from '../../../src/renderer/editor/setup'
 import { snippetRegistry, snippetSource } from '../../../src/renderer/editor/snippets'
 
@@ -85,10 +86,13 @@ async function open(view: EditorView): Promise<void> {
   expect(completionStatus(view.state)).toBe('active')
   await new Promise((r) => setTimeout(r, 90))
 }
-function mount(doc: string): EditorView {
+function mount(doc: string, mode: 'edit' | 'present' = 'edit', headerHidden = false): EditorView {
   const parent = document.createElement('div')
   document.body.append(parent)
-  const view = new EditorView({ state: createState(doc, '\n', 'preview'), parent })
+  const view = new EditorView({
+    state: createState(doc, '\n', 'preview', headerHidden, mode),
+    parent,
+  })
   view.dispatch({ selection: { anchor: doc.length } })
   return view
 }
@@ -198,5 +202,123 @@ describe('snippet completion in the editor', () => {
     view.contentDOM.dispatchEvent(second)
     expect(second.defaultPrevented).toBe(false)
     view.destroy()
+  })
+})
+
+const isCollapsed = (view: EditorView) => view.state.field(headerFold).size > 0
+const fill = (view: EditorView, text: string) =>
+  view.dispatch(view.state.update(view.state.replaceSelection(text), { userEvent: 'input.type' }))
+async function insertMeeting(view: EditorView): Promise<void> {
+  type(view, ':mee')
+  startCompletion(view)
+  await open(view)
+  acceptCompletion(view)
+}
+
+describe('Shift+Tab', () => {
+  it('goes back to the previous field', async () => {
+    const view = mount('')
+    await insertMeeting(view)
+    key(view, 'Tab')
+    expect(sel(view)).toBe('Thema')
+    expect(key(view, 'Tab', true)).toBe(true)
+    expect(sel(view)).toBe('Kunde')
+    view.destroy()
+  })
+
+  it('reaches a header field again while the header is hidden (Edit)', async () => {
+    const view = mount('', 'edit', true)
+    await insertMeeting(view)
+    key(view, 'Tab')
+    key(view, 'Tab')
+    expect(sel(view)).toBe('Name')
+    expect(isCollapsed(view)).toBe(true)
+    key(view, 'Tab', true)
+    expect(sel(view)).toBe('Thema')
+    expect(isCollapsed(view)).toBe(false)
+    view.destroy()
+  })
+})
+
+describe('header snippets in Present', () => {
+  it('keeps the header open while a field inside it is active, then collapses it', async () => {
+    const view = mount('', 'present')
+    await insertMeeting(view)
+    expect(sel(view)).toBe('Kunde')
+    expect(isCollapsed(view)).toBe(false)
+    fill(view, 'ACME')
+    expect(key(view, 'Tab')).toBe(true)
+    expect(sel(view)).toBe('Thema')
+    expect(isCollapsed(view)).toBe(false)
+    fill(view, 'Kickoff')
+    for (const stop of ['Name', 'Punkt', '', 'Aufgabe', 'Name', 'Datum']) {
+      expect(key(view, 'Tab')).toBe(true)
+      expect(sel(view)).toBe(stop)
+      expect(isCollapsed(view)).toBe(true)
+    }
+    const before = view.state.doc.toString()
+    expect(key(view, 'Tab')).toBe(true) // to $0: the session ends
+    expect(view.state.doc.toString()).toBe(before)
+    expect(view.state.selection.main.head).toBe(before.length - 1) // $0 before the final newline
+    await tick()
+    expect(before.startsWith('---\nclient: "ACME"\ntitle: "Kickoff"\n')).toBe(true)
+    expect(isCollapsed(view)).toBe(true)
+    // Read-only and the cursor stays out again.
+    view.dispatch({ changes: { from: 4, insert: 'x' } })
+    expect(view.state.doc.toString()).toBe(before)
+    view.dispatch({ selection: { anchor: 2 } })
+    expect(view.state.selection.main.head).toBeGreaterThan(view.state.doc.line(7).from - 1)
+    view.destroy()
+  })
+
+  it('Shift+Tab from the body back into the header opens it again', async () => {
+    const view = mount('', 'present')
+    await insertMeeting(view)
+    key(view, 'Tab')
+    key(view, 'Tab')
+    expect(isCollapsed(view)).toBe(true)
+    expect(key(view, 'Tab', true)).toBe(true)
+    expect(sel(view)).toBe('Thema')
+    expect(isCollapsed(view)).toBe(false)
+    fill(view, 'Neu')
+    expect(view.state.doc.toString()).toContain('title: "Neu"')
+    view.destroy()
+  })
+
+  it('Escape inside a header field ends the session, collapses and moves the cursor out', async () => {
+    const view = mount('', 'present')
+    await insertMeeting(view)
+    fill(view, 'ACME')
+    // Let the typing-triggered completion query settle, so Esc reaches the snippet keymap.
+    await until(() => completionStatus(view.state) === null)
+    await new Promise((r) => setTimeout(r, 250))
+    const ev = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true, bubbles: true })
+    view.contentDOM.dispatchEvent(ev)
+    expect(ev.defaultPrevented).toBe(true)
+    expect(isCollapsed(view)).toBe(true)
+    await tick()
+    const end = view.state.doc.toString().indexOf('\n---\n') + 4
+    expect(view.state.selection.main.head).toBeGreaterThan(end)
+    expect(view.state.doc.toString()).toContain('client: "ACME"')
+    view.destroy()
+  })
+
+  it(':telefonnotiz and :header also stay reachable', async () => {
+    for (const [trigger, first, second] of [
+      [':tel', 'Firma', 'Name'],
+      [':hea', 'Titel', ''],
+    ] as const) {
+      const view = mount('', 'present')
+      type(view, trigger)
+      startCompletion(view)
+      await open(view)
+      acceptCompletion(view)
+      expect(sel(view)).toBe(first)
+      expect(isCollapsed(view)).toBe(false)
+      key(view, 'Tab')
+      expect(sel(view)).toBe(second)
+      expect(isCollapsed(view)).toBe(false)
+      view.destroy()
+    }
   })
 })
