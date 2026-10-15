@@ -43,6 +43,7 @@ Die Preview nutzt die Schriften von rf-document aus dessen Installationsordner u
 | Mod+E | PDF exportieren |
 | Mod+Shift+M | Code-Ansicht ein/aus (Preview ist Standard) |
 | Mod+Shift+H | YAML-Header in der Preview ein-/ausblenden (ausgeblendet erscheint der Titelblock wie im PDF) |
+| Mod+Shift+O | Gliederung ein/aus (je Modus gemerkt) |
 | macOS Cmd+Alt+[ / ], sonst Ctrl+Shift+[ / ] | Abschnitt ein-/ausklappen |
 | macOS Ctrl+Alt+[ / ], sonst Alt+0 / Alt+Shift+0 | Alle Abschnitte ein-/ausklappen |
 | Mod+Shift+P, Esc | Präsentieren ein/aus (Vollbild, nur Text und Infozeile) |
@@ -52,6 +53,10 @@ Die Preview nutzt die Schriften von rf-document aus dessen Installationsordner u
 | Mod+Z / Mod+Shift+Z, Mod+X/C/V, Mod+A | Widerrufen/Wiederholen, Ausschneiden/Kopieren/Einfügen, Alles auswählen |
 
 `Mod` = Cmd unter macOS, sonst Ctrl. Die Auswahl mit Shift bzw. Mod+Shift und den Pfeiltasten übernimmt CodeMirror.
+
+## Gliederung
+
+Eine Seitenleiste rechts listet die Überschriften H1 und H2 der Notiz. Der Pfeil vor einer H1 klappt den Abschnitt im Text und in der Gliederung gleichzeitig ein oder aus; „Alle ein-/ausklappen“ wirkt ebenso auf beide. Ein Klick auf einen Eintrag springt im Text zur Überschrift, der Fokus bleibt im Editor. Mod+Shift+O blendet die Gliederung ein oder aus; die Einstellung wird getrennt für Edit und Present gemerkt.
 
 ## Snippets
 

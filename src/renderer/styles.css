@@ -165,6 +165,7 @@ dialog.prompt input:focus-visible {
   min-width: 0;
 }
 #outline {
+  box-sizing: border-box;
   width: max-content;
   min-width: 14em;
   max-width: 33vw;
