@@ -13,7 +13,7 @@
 
 ## Status
 
-In development. Available: tabs, autosave with atomic writes, rename, session restore, detection of external changes and PDF export via rf-document and the PDF look in the preview. Not yet available: presentation mode, snippets and one-line installation.
+In development. Available: tabs, autosave with atomic writes, rename, session restore, detection of external changes and PDF export via rf-document, and the PDF look in the preview. Not yet available: presentation mode, snippets and one-line installation.
 
 ## Prerequisites (development)
 
@@ -44,7 +44,7 @@ The preview uses rf-document's fonts from its install folder and otherwise falls
 | Mod+Shift+M | Toggle code view (preview is the default) |
 | Mod+Shift+H | Show/hide the YAML header in the preview (hidden, the title block appears as in the PDF) |
 | macOS Cmd+Alt+[ / ], otherwise Ctrl+Shift+[ / ] | Fold/unfold section |
-| Ctrl+Alt+[ / ] | Fold/unfold all sections |
+| macOS Ctrl+Alt+[ / ], otherwise Alt+0 / Alt+Shift+0 | Fold/unfold all sections |
 | Ctrl+Tab / Ctrl+Shift+Tab, Mod+1…9 | Switch tabs |
 | Mod+Z / Mod+Shift+Z, Mod+X/C/V, Mod+A | Undo/Redo, Cut/Copy/Paste, Select all |
 

@@ -166,7 +166,7 @@ Zoom is stored separately for Edit and Present. In Edit, 100 % equals the PDF's 
 | | Code / Preview | Mod+Shift+M |
 | | YAML header show/hide | Mod+Shift+H |
 | | Fold / unfold section | macOS Cmd+Alt+[ / ], else Ctrl+Shift+[ / ] |
-| | Fold all / unfold all | Ctrl+Alt+[ / ] |
+| | Fold all / unfold all | macOS Ctrl+Alt+[ / ], else Alt+0 / Alt+Shift+0 (Ctrl+Alt is AltGr there and types `[` / `]`) |
 | | Zoom in / out / 100 % | Mod+= / Mod+- / Mod+0 |
 | Window | Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab, Mod+1…9 |
 
@@ -185,7 +185,7 @@ The dialog also shows a read-only status: whether rf-document and the fonts were
 
 - Fonts are looked up in `~/.local/share/real-fast-document/fonts/`, or `%LOCALAPPDATA%\real-fast-document\fonts\` on Windows.
 - Files: `SourceSans3VF-*`, `SourceSerif4Variable-*`, `SourceCodeVF-*`, `NotoEmoji[wght].ttf`.
-- They are served to the renderer via a privileged custom protocol, `rfw-font://`, and declared with `@font-face`.
+- They are served to the renderer via a privileged custom protocol, `rfw-font://`, and registered at runtime via the FontFace API (`new FontFace(…)` + `document.fonts.add`), not with `@font-face`.
 - If they are missing, rf-write uses system fallbacks (`system-ui`, `Georgia`, `ui-monospace`) and shows a notice once per session.
 
 ## 13. Architecture

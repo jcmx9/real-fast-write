@@ -44,7 +44,7 @@ Die Preview nutzt die Schriften von rf-document aus dessen Installationsordner u
 | Mod+Shift+M | Code-Ansicht ein/aus (Preview ist Standard) |
 | Mod+Shift+H | YAML-Header in der Preview ein-/ausblenden (ausgeblendet erscheint der Titelblock wie im PDF) |
 | macOS Cmd+Alt+[ / ], sonst Ctrl+Shift+[ / ] | Abschnitt ein-/ausklappen |
-| Ctrl+Alt+[ / ] | Alle Abschnitte ein-/ausklappen |
+| macOS Ctrl+Alt+[ / ], sonst Alt+0 / Alt+Shift+0 | Alle Abschnitte ein-/ausklappen |
 | Ctrl+Tab / Ctrl+Shift+Tab, Mod+1…9 | Tabs wechseln |
 | Mod+Z / Mod+Shift+Z, Mod+X/C/V, Mod+A | Widerrufen/Wiederholen, Ausschneiden/Kopieren/Einfügen, Alles auswählen |
 
