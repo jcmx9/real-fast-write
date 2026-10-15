@@ -13,13 +13,17 @@ const message = (err: unknown): string => (err instanceof Error ? err.message : 
 export function registerIpc(ctx: AppContext): void {
   ipcMain.handle(Ch.startup, () => ctx.startup())
 
-  ipcMain.handle(Ch.setFullScreen, (e, on: unknown) => {
+  /** Returns whether the window was fullscreen before the change. */
+  ipcMain.handle(Ch.setFullScreen, (e, on: unknown): boolean => {
     const win = BrowserWindow.fromWebContents(e.sender)
-    if (!win) return
+    if (!win) return false
     const flag = on === true
+    const was = win.isFullScreen()
+    if (!flag && was) ctx.fullScreenLeaves.expectLeave()
     // macOS hides the menu bar in fullscreen itself; Windows/Linux need it hidden explicitly.
     if (process.platform !== 'darwin') win.setMenuBarVisibility(!flag)
     win.setFullScreen(flag)
+    return was
   })
 
   ipcMain.handle(Ch.readNote, async (_e, path: unknown): Promise<NoteFile | { error: string }> => {

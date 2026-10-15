@@ -53,6 +53,10 @@ export class App {
   private mode: Mode = 'edit'
   private zoom = { edit: 1, present: 1 }
   private presentFactor = 1.6
+  /** The window was already fullscreen when Present started: leaving Present keeps it so. */
+  private wasFullScreen = false
+  /** Serializes fullscreen requests so fast toggles reach main in order. */
+  private fullScreenOps: Promise<void> = Promise.resolve()
   private shownId: number | null = null
   private readonly saveErrors = new Map<number, string>()
   private readonly conflicts = new Set<number>()
@@ -339,7 +343,15 @@ export class App {
     this.applyZoom()
     this.refresh()
     this.editor.focus()
-    await this.rfw.setFullScreen(true)
+    await this.queueFullScreen(async () => {
+      try {
+        this.wasFullScreen = await this.rfw.setFullScreen(true)
+      } catch (e) {
+        this.wasFullScreen = false
+        console.error('setFullScreen(true) failed', e)
+        this.notices.toast('Vollbild nicht verfügbar')
+      }
+    })
   }
 
   /** fullScreen=false when the OS already left fullscreen (avoid a second toggle). */
@@ -355,7 +367,19 @@ export class App {
     this.applyZoom()
     this.refresh()
     this.editor.focus()
-    if (fullScreen) await this.rfw.setFullScreen(false)
+    await this.queueFullScreen(async () => {
+      if (!fullScreen || this.wasFullScreen) return
+      try {
+        await this.rfw.setFullScreen(false)
+      } catch (e) {
+        console.error('setFullScreen(false) failed', e)
+      }
+    })
+  }
+
+  private queueFullScreen(op: () => Promise<void>): Promise<void> {
+    this.fullScreenOps = this.fullScreenOps.then(op)
+    return this.fullScreenOps
   }
 
   private toggleHeader(): void {
@@ -395,6 +419,8 @@ export class App {
     this.saveErrors.delete(id)
     this.conflicts.delete(id)
     this.saving.delete(id)
+    // Present never shows the empty state.
+    if (this.mode === 'present' && this.store.all.length === 0) await this.exitPresent()
     this.show()
   }
 
