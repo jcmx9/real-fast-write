@@ -34,18 +34,45 @@ describe('buildMenuTemplate', () => {
     ['select-all', 'CmdOrCtrl+A'],
     ['next-tab', 'Ctrl+Tab'],
     ['prev-tab', 'Ctrl+Shift+Tab'],
+    ['toggle-present', 'CmdOrCtrl+Shift+P'],
     ['toggle-view', 'CmdOrCtrl+Shift+M'],
     ['toggle-header', 'CmdOrCtrl+Shift+H'],
     ['fold', 'Cmd+Alt+['],
     ['unfold', 'Cmd+Alt+]'],
     ['fold-all', 'Ctrl+Alt+['],
     ['unfold-all', 'Ctrl+Alt+]'],
+    ['zoom-in', 'CmdOrCtrl+Plus'],
+    ['zoom-out', 'CmdOrCtrl+-'],
+    ['zoom-reset', 'CmdOrCtrl+0'],
   ])('%s has accelerator %s and sends its command', (id, accelerator) => {
     const d = deps()
     const item = byId(buildMenuTemplate(d), id)
     expect(item?.accelerator).toBe(accelerator)
     click(item)
     expect(d.command).toHaveBeenCalledWith(id)
+  })
+
+  it('ignores toggle-present key repeats from a held shortcut', () => {
+    let now = 1000
+    const d = deps({ now: () => now })
+    const item = byId(buildMenuTemplate(d), 'toggle-present')
+    if (!item) throw new Error('menu item not found')
+    const key = () =>
+      (item.click as unknown as (a: unknown, b: unknown, e: unknown) => void)(null, null, {
+        triggeredByAccelerator: true,
+      })
+    key()
+    for (let i = 0; i < 20; i++) {
+      now += 40 // OS key repeat while the shortcut is held
+      key()
+    }
+    expect(d.command).toHaveBeenCalledTimes(1)
+    now += 1000 // released, pressed again later
+    key()
+    expect(d.command).toHaveBeenCalledTimes(2)
+    // Mouse clicks on the menu item are never debounced.
+    click(item)
+    expect(d.command).toHaveBeenCalledTimes(3)
   })
 
   it('has an app menu on macOS and a quit item elsewhere', () => {
@@ -92,12 +119,16 @@ describe('buildMenuTemplate', () => {
     const view = buildMenuTemplate(deps()).find((m) => m.label === 'Ansicht')
     const ids = ((view?.submenu ?? []) as { id?: string }[]).map((i) => i.id).filter(Boolean)
     expect(ids).toEqual([
+      'toggle-present',
       'toggle-view',
       'toggle-header',
       'fold',
       'unfold',
       'fold-all',
       'unfold-all',
+      'zoom-in',
+      'zoom-out',
+      'zoom-reset',
     ])
   })
 })

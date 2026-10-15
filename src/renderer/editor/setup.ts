@@ -4,10 +4,11 @@ import { codeFolding, foldGutter, foldKeymap, unfoldAll } from '@codemirror/lang
 import { languages } from '@codemirror/language-data'
 import { Compartment, EditorState, type Extension, type Text } from '@codemirror/state'
 import { drawSelection, EditorView, type KeyBinding, keymap, lineNumbers } from '@codemirror/view'
-import type { Eol, View } from '../../shared/types'
+import type { Eol, Mode, View } from '../../shared/types'
 import { Frontmatter, frontmatterRange } from './frontmatter'
 import { headerFold, headerHidden } from './header'
 import { rfHighlight } from './highlight'
+import { modeCompartment, modeExtensions } from './mode'
 import { previewPlugin } from './preview'
 import { foldAllSections } from './sections'
 import { tableField } from './tables'
@@ -47,6 +48,7 @@ export function createState(
   eol: Eol,
   view: View,
   headerHiddenInit = false,
+  mode: Mode = 'edit',
 ): EditorState {
   const state = EditorState.create({
     doc: text,
@@ -61,9 +63,10 @@ export function createState(
       headerHidden.init(() => headerHiddenInit),
       EditorView.lineWrapping,
       viewCompartment.of(viewExtensions(view)),
+      modeCompartment.of(modeExtensions(mode)),
     ],
   })
-  const range = headerHiddenInit ? frontmatterRange(state.doc) : null
+  const range = headerHiddenInit || mode === 'present' ? frontmatterRange(state.doc) : null
   if (!range) return state
   // Cursor right after the collapsed (atomic) header, not inside it.
   return state.update({ selection: { anchor: Math.min(range.to + 1, state.doc.length) } }).state

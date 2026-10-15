@@ -8,10 +8,30 @@ export interface MenuDeps {
   command(c: MenuCommand): void
   openRecent(path: string): void
   clearRecent(): void
+  /** Clock for the held-shortcut guard (tests); defaults to Date.now. */
+  now?: () => number
+}
+
+/** Key repeats closer than this belong to one held shortcut. */
+const KEY_REPEAT_MS = 500
+
+/** Electron passes this as the click handler's third argument. */
+interface ClickEvent {
+  triggeredByAccelerator?: boolean
 }
 
 export function buildMenuTemplate(d: MenuDeps): MenuItemConstructorOptions[] {
   const mac = d.platform === 'darwin'
+  const now = d.now ?? Date.now
+  // A held Cmd/Ctrl+Shift+P repeats; only the first press toggles Present (no flapping).
+  let lastPresentKey = Number.NEGATIVE_INFINITY
+  const heldRepeat = (id: MenuCommand, event: ClickEvent | undefined): boolean => {
+    if (id !== 'toggle-present' || !event?.triggeredByAccelerator) return false
+    const t = now()
+    const repeat = t - lastPresentKey < KEY_REPEAT_MS
+    lastPresentKey = t
+    return repeat
+  }
   const item = (
     id: MenuCommand,
     label: string,
@@ -20,7 +40,9 @@ export function buildMenuTemplate(d: MenuDeps): MenuItemConstructorOptions[] {
     id,
     label,
     accelerator,
-    click: () => d.command(id),
+    click: (_item, _win, event: ClickEvent | undefined) => {
+      if (!heldRepeat(id, event)) d.command(id)
+    },
   })
   const sep: MenuItemConstructorOptions = { type: 'separator' }
 
@@ -66,6 +88,8 @@ export function buildMenuTemplate(d: MenuDeps): MenuItemConstructorOptions[] {
   const view: MenuItemConstructorOptions = {
     label: 'Ansicht',
     submenu: [
+      item('toggle-present', 'Präsentieren ein/aus', 'CmdOrCtrl+Shift+P'),
+      sep,
       item('toggle-view', 'Code-Ansicht ein/aus', 'CmdOrCtrl+Shift+M'),
       item('toggle-header', 'YAML-Header ein/aus', 'CmdOrCtrl+Shift+H'),
       sep,
@@ -74,6 +98,10 @@ export function buildMenuTemplate(d: MenuDeps): MenuItemConstructorOptions[] {
       // Not Ctrl+Alt on Windows/Linux: that is AltGr, which types `[` / `]` on German layouts.
       item('fold-all', 'Alle einklappen', mac ? 'Ctrl+Alt+[' : 'Alt+0'),
       item('unfold-all', 'Alle ausklappen', mac ? 'Ctrl+Alt+]' : 'Alt+Shift+0'),
+      sep,
+      item('zoom-in', 'Vergrößern', 'CmdOrCtrl+Plus'),
+      item('zoom-out', 'Verkleinern', 'CmdOrCtrl+-'),
+      item('zoom-reset', 'Originalgröße', 'CmdOrCtrl+0'),
       ...(d.isDev
         ? [
             sep,

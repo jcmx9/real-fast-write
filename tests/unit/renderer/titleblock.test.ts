@@ -53,4 +53,9 @@ describe('renderTitleBlock', () => {
     expect(el.classList.contains('rf-titleblock-empty')).toBe(true)
     expect(el.textContent).toBe('⋯ YAML-Header')
   })
+  it("renders nothing with empty style 'none'", () => {
+    const el = renderTitleBlock(null, document, 'none')
+    expect(el.className).toBe('rf-titleblock rf-titleblock-none')
+    expect(el.textContent).toBe('')
+  })
 })

@@ -1,18 +1,22 @@
 import { redo, selectAll, undo } from '@codemirror/commands'
 import { foldCode, unfoldAll, unfoldCode } from '@codemirror/language'
-import type { TransactionSpec } from '@codemirror/state'
+import type { EditorState, TransactionSpec } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
-import type { ExportResult, MenuCommand, NoteFile, View } from '../shared/types'
+import type { ExportResult, MenuCommand, Mode, NoteFile, View } from '../shared/types'
 import { AutosaveScheduler } from './editor/autosave'
-import { headerHidden, headerToggleSpec } from './editor/header'
+import { headerHidden, headerToggleSpec, moveOutOfHeader } from './editor/header'
+import { modeCompartment, modeExtensions } from './editor/mode'
 import { foldAllSections } from './editor/sections'
 import { createState, serializeDoc, viewCompartment, viewExtensions } from './editor/setup'
 import { type Tab, TabStore } from './tabs/tab-store'
+import { InfoLine } from './ui/infoline'
 import { Notices } from './ui/notices'
 import { askText } from './ui/prompt'
-import { type SaveState, StatusLine } from './ui/statusline'
+import { SAVE_STATE_LABEL, type SaveState, StatusLine } from './ui/statusline'
 import { TabBar } from './ui/tabbar'
+import { editorSizes, handleZoomKey, zoomIn, zoomOut } from './ui/zoom'
 import { fileName } from './util/path'
+import { SerialQueue } from './util/serial'
 
 const INSTALL_HINT = [
   'macOS/Linux:',
@@ -33,6 +37,7 @@ export interface AppRoot {
   editor: HTMLElement
   empty: HTMLElement
   status: HTMLElement
+  infoline: HTMLElement
   notices: HTMLElement
 }
 
@@ -44,7 +49,17 @@ export class App {
   private readonly tabBar: TabBar
   private readonly status: StatusLine
   private readonly notices: Notices
+  private readonly infoLine: InfoLine
   private view: View = 'preview'
+  private mode: Mode = 'edit'
+  private zoom = { edit: 1, present: 1 }
+  private presentFactor = 1.6
+  /**
+   * Serializes fullscreen requests so fast toggles reach main in order. Main owns the
+   * fullscreen decision: it only leaves a fullscreen the app started (a user's own
+   * fullscreen survives Present) and never reports its own leave as an OS leave.
+   */
+  private readonly fullScreenOps = new SerialQueue()
   private shownId: number | null = null
   private readonly saveErrors = new Map<number, string>()
   private readonly conflicts = new Set<number>()
@@ -73,6 +88,15 @@ export class App {
     })
     this.status = new StatusLine(root.status, { exportPdf: () => void this.exportPdf() })
     this.notices = new Notices(root.notices)
+    this.infoLine = new InfoLine(root.infoline, {
+      selectTab: (i) => this.activate(i),
+      exitPresent: () => void this.exitPresent(),
+      zoomIn: () => this.setZoom(zoomIn(this.zoom[this.mode])),
+      zoomOut: () => this.setZoom(zoomOut(this.zoom[this.mode])),
+    })
+    this.rfw.onFullScreenLeft(() => {
+      if (this.mode === 'present') void this.exitPresent(false)
+    })
     root.empty
       .querySelector('[data-action=new]')
       ?.addEventListener('click', () => void this.newNote())
@@ -96,6 +120,9 @@ export class App {
       )
     }
     this.view = startup.session.view
+    this.zoom = { ...startup.session.zoom }
+    this.presentFactor = startup.settings.presentFontFactor
+    this.applyZoom()
     for (const t of startup.session.tabs) await this.openPath(t.path, t.headerHidden)
     const activePath = startup.session.tabs[startup.session.activeIndex]?.path
     const activeTab = activePath === undefined ? undefined : this.store.findByPath(activePath)
@@ -108,6 +135,13 @@ export class App {
   // ── commands ────────────────────────────────────────────────────────────
 
   private async command(cmd: MenuCommand): Promise<void> {
+    if (
+      this.mode === 'present' &&
+      (cmd === 'export' || cmd === 'toggle-view' || cmd === 'toggle-header')
+    ) {
+      this.notices.toast('Im Präsentationsmodus nicht verfügbar – Esc beendet ihn.')
+      return
+    }
     switch (cmd) {
       case 'new':
         return this.newNote()
@@ -156,6 +190,16 @@ export class App {
         unfoldAll(this.editor)
         this.editor.focus()
         return
+      case 'zoom-in':
+        return this.setZoom(zoomIn(this.zoom[this.mode]))
+      case 'zoom-out':
+        return this.setZoom(zoomOut(this.zoom[this.mode]))
+      case 'zoom-reset':
+        return this.setZoom(1)
+      case 'toggle-present':
+        // A held or hammered shortcut must not flap while a fullscreen request is in flight.
+        if (this.fullScreenOps.busy) return
+        return this.mode === 'present' ? this.exitPresent() : this.enterPresent()
     }
   }
 
@@ -175,11 +219,41 @@ export class App {
   }
 
   private globalKeys(e: KeyboardEvent): void {
+    if (
+      this.mode === 'present' &&
+      e.key === 'Escape' &&
+      !e.defaultPrevented &&
+      !document.querySelector('dialog[open]')
+    ) {
+      e.preventDefault()
+      void this.exitPresent()
+      return
+    }
+    const zoomed = handleZoomKey(e, isMac, (action) => {
+      const z = this.zoom[this.mode]
+      this.setZoom(action === 'in' ? zoomIn(z) : action === 'out' ? zoomOut(z) : 1)
+    })
+    if (zoomed) return
     const mod = isMac ? e.metaKey : e.ctrlKey
     if (mod && !e.shiftKey && !e.altKey && /^[1-9]$/.test(e.key)) {
       e.preventDefault()
       this.activate(Number(e.key) - 1)
     }
+  }
+
+  private setZoom(next: number): void {
+    this.zoom[this.mode] = Math.min(3, Math.max(0.5, next))
+    this.applyZoom()
+    this.refresh()
+    this.syncMain()
+  }
+
+  /** Scales the editor via CSS custom properties (never Electron page zoom). */
+  private applyZoom(): void {
+    const { body, code } = editorSizes(this.mode, this.zoom[this.mode], this.presentFactor)
+    this.root.editor.style.setProperty('--rf-body-size', body)
+    this.root.editor.style.setProperty('--rf-code-size', code)
+    this.editor.requestMeasure()
   }
 
   private activate(index: number): void {
@@ -192,7 +266,7 @@ export class App {
     const path = await this.rfw.newNotePath()
     this.store.add({
       path,
-      state: createState('', '\n', this.view, false),
+      state: createState('', '\n', this.effectiveView(), false, this.mode),
       bom: false,
       eol: '\n',
       onDisk: false,
@@ -222,7 +296,7 @@ export class App {
     }
     this.store.add({
       path,
-      state: createState(res.text, res.eol, this.view, hideHeader),
+      state: createState(res.text, res.eol, this.effectiveView(), hideHeader, this.mode),
       bom: res.bom,
       eol: res.eol,
       onDisk: true,
@@ -231,26 +305,81 @@ export class App {
     return true
   }
 
+  /** Present always shows Preview; the per-tab Code/Preview choice is kept in this.view. */
+  private effectiveView(): View {
+    return this.mode === 'present' ? 'preview' : this.view
+  }
+
   /** Code <-> Preview for every tab; the documents are never touched. */
   private setView(view: View): void {
     if (view === this.view) return
     this.view = view
-    const reconfigure = viewCompartment.reconfigure(viewExtensions(view))
+    this.reconfigureAll()
+    this.syncMain()
+    this.editor.focus()
+  }
+
+  /** Applies view + mode to every tab; a cursor that would end inside a collapsed header moves out. */
+  private reconfigureAll(): void {
+    const effects = [
+      viewCompartment.reconfigure(viewExtensions(this.effectiveView())),
+      modeCompartment.reconfigure(modeExtensions(this.mode)),
+    ]
+    const collapses = (state: EditorState) =>
+      this.mode === 'present' || (this.effectiveView() === 'preview' && state.field(headerHidden))
     for (const tab of this.store.all) {
       const shown = tab.id === this.shownId
       const state = shown ? this.editor.state : tab.state
-      // Entering Preview with a collapsed header: move a cursor out of the hidden block.
-      const spec: TransactionSpec =
-        view === 'preview' && state.field(headerHidden) ? headerToggleSpec(state, true) : {}
-      const merged: TransactionSpec = {
-        ...spec,
-        effects: [reconfigure, ...[spec.effects ?? []].flat()],
-      }
-      if (shown) this.editor.dispatch(merged)
-      else this.store.updateState(tab.id, state.update(merged).state)
+      const spec: TransactionSpec = { ...(collapses(state) ? moveOutOfHeader(state) : {}), effects }
+      if (shown) this.editor.dispatch(spec)
+      else this.store.updateState(tab.id, state.update(spec).state)
     }
-    this.syncMain()
+  }
+
+  private async enterPresent(): Promise<void> {
+    if (this.mode === 'present' || this.shownId === null) return
+    this.mode = 'present'
+    this.reconfigureAll()
+    document.body.classList.add('rf-mode-present')
+    this.root.tabbar.hidden = true
+    this.root.status.hidden = true
+    this.root.infoline.hidden = false
+    this.infoLine.start()
+    this.applyZoom()
+    this.refresh()
     this.editor.focus()
+    await this.fullScreenOps.run(async () => {
+      try {
+        await this.rfw.setFullScreen(true)
+      } catch (e) {
+        console.error('setFullScreen(true) failed', e)
+        this.notices.toast('Vollbild nicht verfügbar')
+      }
+    })
+  }
+
+  /** fullScreen=false when the OS already left fullscreen (avoid a second toggle). */
+  private async exitPresent(fullScreen = true): Promise<void> {
+    if (this.mode !== 'present') return
+    this.mode = 'edit'
+    this.reconfigureAll()
+    document.body.classList.remove('rf-mode-present')
+    this.root.tabbar.hidden = false
+    this.root.status.hidden = false
+    this.root.infoline.hidden = true
+    this.infoLine.stop()
+    this.applyZoom()
+    this.refresh()
+    this.editor.focus()
+    await this.fullScreenOps.run(async () => {
+      // Sent even for a user's own fullscreen: main keeps that and only restores the menu bar.
+      if (!fullScreen) return
+      try {
+        await this.rfw.setFullScreen(false)
+      } catch (e) {
+        console.error('setFullScreen(false) failed', e)
+      }
+    })
   }
 
   private toggleHeader(): void {
@@ -290,6 +419,8 @@ export class App {
     this.saveErrors.delete(id)
     this.conflicts.delete(id)
     this.saving.delete(id)
+    // Present never shows the empty state.
+    if (this.mode === 'present' && this.store.all.length === 0) await this.exitPresent()
     this.show()
   }
 
@@ -475,7 +606,13 @@ export class App {
   }
 
   private reload(tab: Tab, note: NoteFile): void {
-    const state = createState(note.text, note.eol, this.view, tab.headerHidden)
+    const state = createState(
+      note.text,
+      note.eol,
+      this.effectiveView(),
+      tab.headerHidden,
+      this.mode,
+    )
     tab.bom = note.bom
     tab.eol = note.eol
     this.store.updateState(tab.id, state)
@@ -511,6 +648,16 @@ export class App {
     document.title = tab
       ? `${fileName(tab.path)}${state === 'dirty' ? ' •' : ''} – rf-write`
       : 'rf-write'
+    if (this.mode === 'present') {
+      this.infoLine.render(
+        this.store.all.map((t) => ({ name: fileName(t.path), dirty: this.store.isDirty(t) })),
+        this.store.activeIndex,
+        state === 'error' && error
+          ? `${SAVE_STATE_LABEL.error}: ${error}`
+          : SAVE_STATE_LABEL[state],
+        this.zoom.present,
+      )
+    }
   }
 
   /** Tells main which files to watch and schedules a session write. */
@@ -529,6 +676,6 @@ export class App {
       0,
       tabs.findIndex((t) => t.path === activePath),
     )
-    await this.rfw.saveSession({ tabs, activeIndex, view: this.view })
+    await this.rfw.saveSession({ tabs, activeIndex, view: this.view, zoom: this.zoom })
   }
 }

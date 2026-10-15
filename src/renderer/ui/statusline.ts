@@ -1,6 +1,6 @@
 export type SaveState = 'saved' | 'dirty' | 'new' | 'error'
 
-const LABEL: Record<SaveState, string> = {
+export const SAVE_STATE_LABEL: Record<SaveState, string> = {
   saved: 'Gespeichert',
   dirty: 'Ungespeichert',
   new: 'Neu – wird beim ersten Tippen angelegt',
@@ -31,7 +31,8 @@ export class StatusLine {
 
   render(file: string | null, state: SaveState, error: string | null): void {
     this.name.textContent = file ?? ''
-    this.state.textContent = state === 'error' && error ? `${LABEL.error}: ${error}` : LABEL[state]
+    this.state.textContent =
+      state === 'error' && error ? `${SAVE_STATE_LABEL.error}: ${error}` : SAVE_STATE_LABEL[state]
     this.state.classList.toggle('error', state === 'error')
     this.exportButton.hidden = file === null
   }

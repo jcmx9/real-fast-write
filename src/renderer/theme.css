@@ -71,7 +71,7 @@
 
 .rf-code .cm-scroller {
   font-family: var(--rfd-font-code);
-  font-size: 9pt;
+  font-size: var(--rf-code-size, 9pt);
   line-height: 1.5;
 }
 .rf-code .rf-tok-heading {
@@ -106,9 +106,10 @@
   margin: 0 auto;
   padding: 2em 1.5em 40vh;
 }
-html.rf-justify .rf-preview .cm-line {
+/* rf-document: par(justify: true). Typst hyphenates in the PDF; the editor never does. */
+.rf-preview .cm-line {
   text-align: justify;
-  hyphens: auto;
+  hyphens: manual;
 }
 
 /* Headings: serif, flush-left */
@@ -406,9 +407,21 @@ html.rf-justify .rf-preview .cm-line {
   font-size: 0.9em;
   color: var(--rfd-chrome);
 }
+.rf-preview .rf-titleblock-none {
+  margin: 0;
+}
 .rf-preview .rf-titleblock-empty {
   margin: 0;
   text-align: left;
   font-size: 0.85em;
   color: var(--rfd-faint);
+}
+
+/* Present: larger text in a calm, centred column; no gutters */
+.rf-present .cm-content {
+  max-width: 70ch;
+  padding-top: 3em;
+}
+.rf-present .cm-gutters {
+  display: none;
 }

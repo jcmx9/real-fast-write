@@ -15,4 +15,6 @@ export const Ch = {
   externalChange: 'rfw:external-change',
   beforeClose: 'rfw:before-close',
   closeReady: 'rfw:close-ready',
+  setFullScreen: 'rfw:set-fullscreen',
+  fullScreenLeft: 'rfw:fullscreen-left',
 } as const
