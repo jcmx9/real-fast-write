@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { codeFolding, ensureSyntaxTree, foldEffect, foldedRanges } from '@codemirror/language'
-import { EditorState } from '@codemirror/state'
+import { EditorSelection, EditorState } from '@codemirror/state'
 import { describe, expect, it } from 'vitest'
 import { Frontmatter } from '../../../src/renderer/editor/frontmatter'
 import { headerFold, headerHidden } from '../../../src/renderer/editor/header'
@@ -39,12 +39,12 @@ describe('sectionFoldRanges', () => {
 
 describe('unfoldOnCursor', () => {
   const DOC = '# A\ntext\n# B\nmore'
-  const make = (doc = DOC, extra: unknown[] = []) => {
+  const make = (doc = DOC, extra: unknown[] = [], ext: unknown[] = [unfoldOnCursor]) => {
     const s = EditorState.create({
       doc,
       extensions: [
         codeFolding(),
-        unfoldOnCursor,
+        ...(ext as []),
         markdown({ base: markdownLanguage, extensions: [Frontmatter] }),
         ...(extra as []),
       ],
@@ -60,6 +60,7 @@ describe('unfoldOnCursor', () => {
     return out
   }
 
+  // Regression checks of CodeMirror's own main-head behaviour (pass without the extension).
   it('unfolds a fold the cursor enters; other folds stay', () => {
     const s = foldAll(make())
     expect(folds(s)).toHaveLength(2)
@@ -72,10 +73,41 @@ describe('unfoldOnCursor', () => {
     expect(foldedRanges(s.update({ selection: { anchor: from } }).state).size).toBe(2)
     expect(foldedRanges(s.update({ selection: { anchor: to } }).state).size).toBe(2)
   })
+  // Regression check (CM's own behaviour): explicit selection moved into a fold.
   it('unfolds when an inserted text moves the cursor into a fold', () => {
     const s = foldAll(make())
     const s2 = s.update({ changes: { from: 0, insert: 'x' }, selection: { anchor: 7 } }).state
     expect(folds(s2)).toHaveLength(1)
+  })
+  // What the extension adds beyond CodeMirror.
+  const multi = (ext: unknown[]) => {
+    const s = foldAll(make(DOC, [], ext))
+    const inside = DOC.indexOf('# B') + 5
+    return s.update({
+      selection: EditorSelection.create(
+        [EditorSelection.cursor(0), EditorSelection.cursor(inside)],
+        0,
+      ),
+    }).state
+  }
+  it('multi-cursor: a non-main range entering a fold unfolds it', () => {
+    expect(folds(multi([unfoldOnCursor]))).toHaveLength(1)
+  })
+  it('multi-cursor control: without the extension the fold stays', () => {
+    expect(folds(multi([]))).toHaveLength(2)
+  })
+  // A fold applied while the caret sits inside it (e.g. "fold all") stays until the next
+  // edit; CodeMirror only reacts to selection changes, the extension also to doc changes.
+  const docOnly = (ext: unknown[]) => {
+    const s0 = make(DOC, [], ext).update({ selection: { anchor: 5 } }).state
+    const s = foldAll(s0)
+    return s.update({ changes: { from: 0, insert: 'x' } }).state
+  }
+  it('doc change without explicit selection: head inside a fold unfolds it', () => {
+    expect(folds(docOnly([unfoldOnCursor]))).toHaveLength(1)
+  })
+  it('doc change control: without the extension the fold stays', () => {
+    expect(folds(docOnly([]))).toHaveLength(2)
   })
   it('leaves the YAML header collapse alone', () => {
     const doc = '---\ntitle: x\n---\n\n# A\ntext'
