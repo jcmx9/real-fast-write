@@ -56,12 +56,28 @@ describe('InfoLine', () => {
     line.start()
     expect(q(el, 'il-clock').textContent).toBe('14:30')
     now = new Date(2026, 9, 15, 14, 31)
-    vi.advanceTimersByTime(15_000)
+    vi.advanceTimersByTime(60_000)
     expect(q(el, 'il-clock').textContent).toBe('14:31')
     line.stop()
     now = new Date(2026, 9, 15, 15, 0)
     vi.advanceTimersByTime(60_000)
     expect(q(el, 'il-clock').textContent).toBe('14:31')
+  })
+  it('ticks right at the minute boundary, not up to 15 s late', () => {
+    vi.setSystemTime(new Date(2026, 9, 15, 14, 30, 45, 500))
+    const el = document.createElement('footer')
+    const line = new InfoLine(el, actions())
+    line.start()
+    expect(q(el, 'il-clock').textContent).toBe('14:30')
+    vi.advanceTimersByTime(14_499)
+    expect(q(el, 'il-clock').textContent).toBe('14:30')
+    vi.advanceTimersByTime(1)
+    expect(q(el, 'il-clock').textContent).toBe('14:31')
+    vi.advanceTimersByTime(59_999)
+    expect(q(el, 'il-clock').textContent).toBe('14:31')
+    vi.advanceTimersByTime(1)
+    expect(q(el, 'il-clock').textContent).toBe('14:32')
+    line.stop()
   })
   it('renders names as text, never HTML', () => {
     const el = document.createElement('footer')
@@ -96,14 +112,15 @@ describe('InfoLine focus and lifecycle', () => {
     q(el, 'il-zoom-in').dispatchEvent(ev)
     expect(ev.defaultPrevented).toBe(false)
   })
-  it('ticks once per 15 s even when start() is called twice', () => {
-    const now = vi.fn(() => new Date(2026, 9, 15, 14, 30))
+  it('ticks once per minute even when start() is called twice', () => {
+    vi.setSystemTime(new Date(2026, 9, 15, 14, 30))
+    const now = vi.fn(() => new Date())
     const el = document.createElement('footer')
     const line = new InfoLine(el, actions(), now)
     line.start()
     line.start()
     const afterStart = now.mock.calls.length
-    vi.advanceTimersByTime(15_000)
+    vi.advanceTimersByTime(60_000)
     expect(now.mock.calls.length - afterStart).toBe(1)
     line.stop()
   })
@@ -113,5 +130,44 @@ describe('InfoLine focus and lifecycle', () => {
     line.start()
     line.stop()
     expect(() => line.stop()).not.toThrow()
+  })
+})
+
+describe('InfoLine refresh keeps the tab buttons', () => {
+  const tabs = (dirty: boolean) => [
+    { name: 'A.md', dirty },
+    { name: 'B.md', dirty: false },
+  ]
+  it('updates tab buttons in place, so a click spanning a refresh is not lost', () => {
+    const el = document.createElement('footer')
+    const a = actions()
+    const line = new InfoLine(el, a)
+    line.render(tabs(false), 1, 'Gespeichert', 1)
+    const first = el.querySelectorAll('[data-testid=il-tab]')[0] as HTMLElement
+    first.dispatchEvent(new MouseEvent('mousedown', { button: 0, bubbles: true }))
+    // An autosave state change refreshes the line between mousedown and mouseup.
+    line.render(tabs(true), 1, 'Speichert …', 1)
+    expect(el.querySelectorAll('[data-testid=il-tab]')[0]).toBe(first)
+    expect(el.contains(first)).toBe(true)
+    expect(first.classList.contains('dirty')).toBe(true)
+    first.click()
+    expect(a.selectTab).toHaveBeenCalledWith(0)
+  })
+  it('follows renames, the active tab and a changed tab count', () => {
+    const el = document.createElement('footer')
+    const a = actions()
+    const line = new InfoLine(el, a)
+    line.render(tabs(false), 0, '', 1)
+    line.render([{ name: 'C.md', dirty: false }, ...tabs(false)], 2, '', 1)
+    let buttons = [...el.querySelectorAll('[data-testid=il-tab]')] as HTMLElement[]
+    expect(buttons.map((b) => b.textContent)).toEqual(['C.md', 'A.md', 'B.md'])
+    expect(buttons.map((b) => b.title)).toEqual(['C.md', 'A.md', 'B.md'])
+    expect(buttons.map((b) => b.classList.contains('active'))).toEqual([false, false, true])
+    buttons[2]?.click()
+    expect(a.selectTab).toHaveBeenLastCalledWith(2)
+    line.render([{ name: 'B.md', dirty: false }], 0, '', 1)
+    buttons = [...el.querySelectorAll('[data-testid=il-tab]')] as HTMLElement[]
+    expect(buttons.map((b) => b.textContent)).toEqual(['B.md'])
+    expect(buttons[0]?.classList.contains('active')).toBe(true)
   })
 })

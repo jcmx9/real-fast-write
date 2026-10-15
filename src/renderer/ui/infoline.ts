@@ -44,7 +44,9 @@ export class InfoLine {
   private readonly tabs = document.createElement('span')
   private readonly zoom = document.createElement('span')
   private readonly state = document.createElement('span')
-  private timer: ReturnType<typeof setInterval> | null = null
+  private timer: ReturnType<typeof setTimeout> | null = null
+  /** Kept across refreshes: replacing a button between mousedown and mouseup loses the click. */
+  private readonly tabButtons: HTMLButtonElement[] = []
 
   constructor(
     el: HTMLElement,
@@ -73,30 +75,41 @@ export class InfoLine {
   }
 
   start(): void {
+    this.stop()
     this.tick()
-    if (this.timer === null) this.timer = setInterval(() => this.tick(), 15_000)
   }
 
   stop(): void {
-    if (this.timer !== null) clearInterval(this.timer)
+    if (this.timer !== null) clearTimeout(this.timer)
     this.timer = null
   }
 
   render(tabs: readonly InfoLineTab[], active: number, saveText: string, zoom: number): void {
-    this.tabs.replaceChildren(
-      ...tabs.map((t, i) => {
-        const b = button('il-tab', t.name, t.name, () => this.actions.selectTab(i))
-        b.classList.add('rf-il-tab')
-        b.classList.toggle('active', i === active)
-        b.classList.toggle('dirty', t.dirty)
-        return b
-      }),
-    )
+    // Update in place; only a changed tab count adds or removes buttons at the end.
+    while (this.tabButtons.length > tabs.length) this.tabButtons.pop()?.remove()
+    while (this.tabButtons.length < tabs.length) {
+      const i = this.tabButtons.length
+      const b = button('il-tab', '', '', () => this.actions.selectTab(i))
+      b.classList.add('rf-il-tab')
+      this.tabButtons.push(b)
+      this.tabs.append(b)
+    }
+    tabs.forEach((t, i) => {
+      const b = this.tabButtons[i] as HTMLButtonElement
+      if (b.textContent !== t.name) b.textContent = t.name
+      if (b.title !== t.name) b.title = t.name
+      b.classList.toggle('active', i === active)
+      b.classList.toggle('dirty', t.dirty)
+    })
     this.state.textContent = saveText
     this.zoom.textContent = zoomLabel(zoom)
   }
 
+  /** Shows the time and schedules the next tick at the next minute boundary. */
   private tick(): void {
-    this.clock.textContent = formatClock(this.now())
+    const d = this.now()
+    this.clock.textContent = formatClock(d)
+    const untilNextMinute = 60_000 - (d.getSeconds() * 1000 + d.getMilliseconds())
+    this.timer = setTimeout(() => this.tick(), untilNextMinute)
   }
 }
