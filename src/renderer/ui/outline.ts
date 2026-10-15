@@ -16,7 +16,25 @@ interface Row {
   entry: OutlineEntry
 }
 
-const keyOf = (e: OutlineEntry) => `${e.level}:${e.from}:${e.text}`
+/**
+ * Row keys: level + text + occurrence of that pair, never positions, so typing above a
+ * heading keeps its row (and a click spanning the refresh). Depth-first, folded children included.
+ */
+function keyEntries(entries: OutlineEntry[]): Map<OutlineEntry, string> {
+  const keys = new Map<OutlineEntry, string>()
+  const seen = new Map<string, number>()
+  const walk = (list: OutlineEntry[]) => {
+    for (const e of list) {
+      const base = `${e.level}:${e.text}`
+      const n = seen.get(base) ?? 0
+      seen.set(base, n + 1)
+      keys.set(e, `${base}:${n}`)
+      walk(e.children)
+    }
+  }
+  walk(entries)
+  return keys
+}
 
 /** Right-hand heading list. Pure view: it renders entries and reports clicks. */
 export class Outline {
@@ -25,6 +43,7 @@ export class Outline {
   private readonly empty = document.createElement('p')
   private activeRow: Row | null = null
   private activeKey: string | null = null
+  private keys = new Map<OutlineEntry, string>()
 
   constructor(
     private readonly el: HTMLElement,
@@ -52,11 +71,12 @@ export class Outline {
       this.list.className = 'rf-ol-list'
       this.el.replaceChildren(this.list)
     }
+    this.keys = keyEntries(entries)
     const seen = new Set<string>()
     this.reconcile(this.list, entries, seen)
     for (const k of this.rows.keys()) if (!seen.has(k)) this.rows.delete(k)
 
-    const key = active ? keyOf(active) : null
+    const key = active ? (this.keys.get(active) ?? null) : null
     const row = key ? (this.rows.get(key) ?? null) : null
     this.activeRow?.label.classList.remove('active')
     row?.label.classList.add('active')
@@ -68,7 +88,7 @@ export class Outline {
   private reconcile(ul: HTMLUListElement, entries: OutlineEntry[], seen: Set<string>): void {
     let at: ChildNode | null = ul.firstChild
     for (const e of entries) {
-      const key = keyOf(e)
+      const key = this.keys.get(e) ?? ''
       seen.add(key)
       let row = this.rows.get(key)
       if (!row) {
@@ -89,7 +109,8 @@ export class Outline {
 
   private update(row: Row, e: OutlineEntry, seen: Set<string>): void {
     const hasFold = e.fold !== null
-    if (row.chevron.isConnected !== hasFold) {
+    // parentNode, not isConnected: the list may be detached while it is being built.
+    if ((row.chevron.parentNode !== null) !== hasFold) {
       // Chevron and spacer occupy the same slot.
       if (hasFold) row.spacer.replaceWith(row.chevron)
       else row.chevron.replaceWith(row.spacer)

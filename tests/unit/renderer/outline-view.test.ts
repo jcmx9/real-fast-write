@@ -138,6 +138,62 @@ describe('Outline in-place updates', () => {
     expect(labels().map((l) => l.textContent)).toEqual(['Other'])
     expect(el.querySelector('li')).not.toBe(alpha)
   })
+  it('keeps rows when text is inserted above (positions shift), so clicks still land', () => {
+    outline.render(tree(), null)
+    const lis = [...el.querySelectorAll('li')]
+    const beta = labels()[1] as HTMLElement
+    down(beta)
+    const shifted = [
+      entry(1, 'Alpha', 10, {
+        children: [entry(2, 'Beta', 30), entry(2, 'Gamma', 50, { fold: false })],
+      }),
+      entry(1, 'Delta', 70, { fold: false }),
+    ]
+    outline.render(shifted, null)
+    expect([...el.querySelectorAll('li')]).toEqual(lis)
+    beta.click()
+    expect(handlers.jump).toHaveBeenCalledWith(shifted[0]?.children[0])
+  })
+  it('keys duplicate headings by occurrence', () => {
+    outline.render(
+      [entry(1, 'Same', 0, { fold: false }), entry(1, 'Same', 10, { fold: false })],
+      null,
+    )
+    const lis = [...el.querySelectorAll('li')]
+    expect(lis).toHaveLength(2)
+    outline.render(
+      [entry(1, 'Same', 5, { fold: false }), entry(1, 'Same', 15, { fold: false })],
+      null,
+    )
+    expect([...el.querySelectorAll('li')]).toEqual(lis)
+  })
+  it('swaps chevron and spacer in place when a section gains or loses its fold', () => {
+    outline.render([entry(1, 'Alpha', 0, { fold: false })], null)
+    const li = el.querySelector('li') as HTMLElement
+    expect(li.querySelector('.rf-ol-chevron')).toBeNull()
+    expect(li.firstElementChild?.className).toBe('rf-ol-spacer')
+    outline.render([entry(1, 'Alpha', 0)], null)
+    expect(el.querySelector('li')).toBe(li)
+    expect(li.querySelector('.rf-ol-spacer')).toBeNull()
+    expect(li.firstElementChild?.className).toContain('rf-ol-chevron')
+    outline.render([entry(1, 'Alpha', 0, { fold: false })], null)
+    expect(li.querySelector('.rf-ol-chevron')).toBeNull()
+    expect(li.firstElementChild?.className).toBe('rf-ol-spacer')
+  })
+  it('removes rows of deleted headings', () => {
+    outline.render(tree(), null)
+    outline.render(
+      [
+        entry(1, 'Alpha', 0, { children: [entry(2, 'Gamma', 40, { fold: false })] }),
+        entry(1, 'Delta', 60, { fold: false }),
+      ],
+      null,
+    )
+    expect(labels().map((l) => l.textContent)).toEqual(['Alpha', 'Gamma', 'Delta'])
+    outline.render([entry(1, 'Delta', 0, { fold: false })], null)
+    expect(labels().map((l) => l.textContent)).toEqual(['Delta'])
+    expect(el.querySelectorAll('li').length).toBe(1)
+  })
   it('moves .active and scrolls into view only when it changed', () => {
     const scroll = vi.fn()
     Element.prototype.scrollIntoView = scroll

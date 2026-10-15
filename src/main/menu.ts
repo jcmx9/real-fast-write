@@ -94,6 +94,7 @@ export function buildMenuTemplate(d: MenuDeps): MenuItemConstructorOptions[] {
       sep,
       item('toggle-view', 'Code-Ansicht ein/aus', 'CmdOrCtrl+Shift+M'),
       item('toggle-header', 'YAML-Header ein/aus', 'CmdOrCtrl+Shift+H'),
+      item('toggle-outline', 'Gliederung ein/aus', 'CmdOrCtrl+Shift+O'),
       sep,
       item('fold', 'Abschnitt einklappen', `${foldKey}[`),
       item('unfold', 'Abschnitt ausklappen', `${foldKey}]`),

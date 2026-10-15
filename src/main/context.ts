@@ -196,6 +196,7 @@ export class AppContext {
     if (patch.mode !== undefined) next.mode = patch.mode
     if (patch.view !== undefined) next.view = patch.view
     if (patch.zoom !== undefined) next.zoom = patch.zoom
+    if (patch.outline !== undefined) next.outline = patch.outline
     this.session = sanitizeSession(next)
     await this.persistSession()
   }
