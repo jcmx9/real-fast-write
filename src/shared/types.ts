@@ -69,6 +69,12 @@ export type MenuCommand =
   | 'undo'
   | 'redo'
   | 'select-all'
+  | 'toggle-view'
+  | 'toggle-header'
+  | 'fold'
+  | 'unfold'
+  | 'fold-all'
+  | 'unfold-all'
 
 export interface RfwApi {
   startup(): Promise<StartupState>

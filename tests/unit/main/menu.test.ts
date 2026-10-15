@@ -34,6 +34,12 @@ describe('buildMenuTemplate', () => {
     ['select-all', 'CmdOrCtrl+A'],
     ['next-tab', 'Ctrl+Tab'],
     ['prev-tab', 'Ctrl+Shift+Tab'],
+    ['toggle-view', 'CmdOrCtrl+Shift+M'],
+    ['toggle-header', 'CmdOrCtrl+Shift+H'],
+    ['fold', 'Cmd+Alt+['],
+    ['unfold', 'Cmd+Alt+]'],
+    ['fold-all', 'Ctrl+Alt+['],
+    ['unfold-all', 'Ctrl+Alt+]'],
   ])('%s has accelerator %s and sends its command', (id, accelerator) => {
     const d = deps()
     const item = byId(buildMenuTemplate(d), id)
@@ -68,5 +74,26 @@ describe('buildMenuTemplate', () => {
       flatten(buildMenuTemplate(deps({ isDev }))).some((i) => i.role === 'toggleDevTools')
     expect(has(true)).toBe(true)
     expect(has(false)).toBe(false)
+  })
+
+  it('uses Ctrl+Shift+[ / ] for folding on Windows and Linux', () => {
+    for (const platform of ['win32', 'linux'] as const) {
+      const items = flatten(buildMenuTemplate(deps({ platform })))
+      expect(items.find((i) => i.id === 'fold')?.accelerator).toBe('Ctrl+Shift+[')
+      expect(items.find((i) => i.id === 'unfold')?.accelerator).toBe('Ctrl+Shift+]')
+    }
+  })
+
+  it('puts the view items under "Ansicht" in production too', () => {
+    const view = buildMenuTemplate(deps()).find((m) => m.label === 'Ansicht')
+    const ids = ((view?.submenu ?? []) as { id?: string }[]).map((i) => i.id).filter(Boolean)
+    expect(ids).toEqual([
+      'toggle-view',
+      'toggle-header',
+      'fold',
+      'unfold',
+      'fold-all',
+      'unfold-all',
+    ])
   })
 })
