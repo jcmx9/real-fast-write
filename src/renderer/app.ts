@@ -28,12 +28,12 @@ import {
 } from './editor/setup'
 import { snippetRegistry } from './editor/snippets'
 import { type Tab, TabStore } from './tabs/tab-store'
-import { editTarget } from './ui/edit-target'
+import { allowedWithDialog, editTarget } from './ui/edit-target'
 import { InfoLine } from './ui/infoline'
 import { Notices } from './ui/notices'
 import { Outline } from './ui/outline'
 import { askText } from './ui/prompt'
-import { openSettings } from './ui/settings'
+import { droppedFields, openSettings, STATUS_TIMEOUT_MS, withTimeout } from './ui/settings'
 import { type SaveState, StatusLine, saveText } from './ui/statusline'
 import { TabBar } from './ui/tabbar'
 import { editorSizes, handleZoomKey, zoomIn, zoomOut } from './ui/zoom'
@@ -217,6 +217,8 @@ export class App {
   private async command(cmd: MenuCommand): Promise<void> {
     // While the window closes nothing may change a document, a path or the tab list.
     if (this.closing) return
+    // Behind a modal dialog only the edit commands run (they serve its text fields).
+    if (!allowedWithDialog(cmd, document.querySelector('dialog[open]') !== null)) return
     if (
       this.mode === 'present' &&
       (cmd === 'export' || cmd === 'toggle-view' || cmd === 'toggle-header' || cmd === 'settings')
@@ -296,12 +298,18 @@ export class App {
     try {
       const patch = await openSettings({
         settings: current,
-        status: this.rfw.getSettingsStatus(),
+        status: withTimeout(this.rfw.getSettingsStatus(), STATUS_TIMEOUT_MS),
         choose: (kind, path) => this.rfw.choosePath(kind, path),
       })
       if (!patch || Object.keys(patch).length === 0) return
       const next = await this.rfw.updateSettings(patch)
       this.settings = next
+      const dropped = droppedFields(patch, next)
+      if (dropped.length > 0)
+        this.notices.panel(
+          'Nicht alle Einstellungen übernommen',
+          `${dropped.join('\n')}\nFür diese Felder gilt weiter der bisherige Wert.`,
+        )
       if (next.presentFontFactor !== this.presentFactor) {
         this.presentFactor = next.presentFontFactor
         this.applyZoom()

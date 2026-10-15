@@ -42,6 +42,24 @@ export function statusLines(s: SettingsStatus): { rfDocument: string; fonts: str
   }
 }
 
+/** The status block gives up after this long (a stalled network drive, a hanging lookup). */
+export const STATUS_TIMEOUT_MS = 15_000
+
+export class StatusTimeout extends Error {
+  constructor(readonly ms: number) {
+    super(`keine Antwort nach ${Math.round(ms / 1000)} s`)
+  }
+}
+
+/** Rejects with StatusTimeout unless `promise` settles within `ms`. */
+export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new StatusTimeout(ms)), ms)
+  })
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
+}
+
 interface PathField {
   key: 'defaultFolder' | 'snippetFolder' | 'rfDocumentPath'
   testid: string
@@ -74,6 +92,35 @@ const PATH_FIELDS: readonly PathField[] = [
     optional: true,
   },
 ]
+
+const DROP_REASONS: Record<keyof Settings, string> = {
+  defaultFolder: 'kein gültiger absoluter Pfad',
+  snippetFolder: 'kein gültiger absoluter Pfad',
+  rfDocumentPath: 'keine ausführbare Datei namens rf-document',
+  presentFontFactor: 'ungültiger Wert',
+  headerDefault: 'ungültiger Wert',
+}
+
+const FACTOR_LABEL = 'Schriftfaktor im Präsentationsmodus'
+
+const FIELD_LABELS: Record<keyof Settings, string> = {
+  ...(Object.fromEntries(PATH_FIELDS.map((f) => [f.key, f.label])) as Record<
+    PathField['key'],
+    string
+  >),
+  presentFontFactor: FACTOR_LABEL,
+  headerDefault: 'YAML-Header in der Vorschau',
+}
+
+/**
+ * The dialog's values that main refused (it keeps the current one instead), as
+ * "<label>: <reason>" lines in dialog order. Empty when everything was stored.
+ */
+export function droppedFields(patch: SettingsPatch, saved: Settings): string[] {
+  return (Object.keys(FIELD_LABELS) as (keyof Settings)[])
+    .filter((key) => patch[key] !== undefined && patch[key] !== saved[key])
+    .map((key) => `${FIELD_LABELS[key]}: ${DROP_REASONS[key]}`)
+}
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -134,7 +181,7 @@ export function openSettings(deps: SettingsDialogDeps): Promise<SettingsPatch | 
     factor.min = String(FACTOR_MIN)
     factor.max = String(FACTOR_MAX)
     factor.step = '0.1'
-    const factorLabel = el('label', { textContent: 'Schriftfaktor im Präsentationsmodus' })
+    const factorLabel = el('label', { textContent: FACTOR_LABEL })
     factorLabel.append(factor)
 
     const header = el('fieldset', { className: 'settings-header' })
@@ -165,8 +212,11 @@ export function openSettings(deps: SettingsDialogDeps): Promise<SettingsPatch | 
         rfd.textContent = lines.rfDocument
         fonts.textContent = lines.fonts
       },
-      () => {
-        rfd.textContent = 'Status nicht verfügbar'
+      (e: unknown) => {
+        rfd.textContent =
+          e instanceof StatusTimeout
+            ? `Status nicht verfügbar (${e.message})`
+            : 'Status nicht verfügbar'
       },
     )
 

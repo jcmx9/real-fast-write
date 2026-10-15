@@ -90,3 +90,26 @@ test('settings: header default „als Titelblock“ applies to a newly opened no
   expect((await readFile(note)).equals(original)).toBe(true)
   await app.close()
 })
+
+test('settings: menu commands wait behind the dialog; a refused rf-document is reported', async () => {
+  const { app, page, userData } = await launch()
+  await expect(page.locator('[data-testid=tab]')).toHaveCount(1)
+  await clickMenu(app, 'settings')
+  const dialog = page.locator('dialog.settings')
+  await expect(dialog).toBeVisible()
+  for (const cmd of ['toggle-present', 'new', 'close-tab', 'export']) await clickMenu(app, cmd)
+  await expect(dialog).toBeVisible()
+  await expect(page.locator('body.rf-mode-present')).toHaveCount(0)
+  await expect(page.locator('[data-testid=tab]')).toHaveCount(1)
+
+  // An executable that is not rf-document: main keeps the old value, the app says so.
+  await page.getByTestId('settings-rf-document').fill(process.execPath)
+  await page.getByTestId('settings-save').click()
+  await expect(dialog).toHaveCount(0)
+  const panel = page.locator('.panel')
+  await expect(panel).toContainText('Nicht alle Einstellungen übernommen')
+  await expect(panel).toContainText('rf-document: keine ausführbare Datei namens rf-document')
+  const stored = JSON.parse(await readFile(join(userData, 'settings.json'), 'utf8'))
+  expect(stored.rfDocumentPath).toBe('')
+  await app.close()
+})

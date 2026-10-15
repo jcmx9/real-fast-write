@@ -79,7 +79,7 @@ curl -fsSL https://raw.githubusercontent.com/jcmx9/real-fast-write/dev/scripts/b
 
 ## Einstellungen
 
-„Einstellungen …“ (macOS Cmd+, im App-Menü, sonst Ctrl+, im Menü „Datei“) öffnet den Dialog: Standardordner für neue Notizen, Snippet-Ordner, Pfad zu rf-document (leer = automatisch suchen), Schriftfaktor im Präsentationsmodus und die Voreinstellung für den YAML-Header in der Vorschau (als YAML oder als Titelblock). Ein schreibgeschützter Statusblock zeigt, ob rf-document und die Schriften gefunden wurden. Das Ändern des Standardordners verschiebt oder löscht keine Dateien.
+„Einstellungen …“ (macOS Cmd+, im App-Menü, sonst Ctrl+, im Menü „Datei“) öffnet den Dialog: Standardordner für neue Notizen, Snippet-Ordner, Pfad zu rf-document (leer = automatisch suchen), Schriftfaktor im Präsentationsmodus und die Voreinstellung für den YAML-Header in der Vorschau (als YAML oder als Titelblock). Ein schreibgeschützter Statusblock zeigt, ob rf-document und die Schriften gefunden wurden. Das Ändern des Standardordners verschiebt oder löscht keine Dateien. Als rf-document wird nur eine ausführbare Datei namens `rf-document` (Windows `rf-document.cmd`/`.exe`) übernommen; nicht übernommene Werte nennt rf-write nach dem Speichern, für sie gilt der bisherige Wert.
 
 ## Verwendung
 

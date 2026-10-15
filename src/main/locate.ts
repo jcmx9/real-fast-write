@@ -54,3 +54,23 @@ export async function isExecutableFile(file: string): Promise<boolean> {
     return false
   }
 }
+
+const RF_DOCUMENT_NAMES = new Set(['rf-document', 'rf-document.cmd', 'rf-document.exe'])
+
+/** File name check for a user-chosen rf-document (case-insensitive on Windows). */
+export function isRfDocumentName(
+  file: string,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  const win = platform === 'win32'
+  const name = (win ? path.win32 : path.posix).basename(file)
+  return RF_DOCUMENT_NAMES.has(win ? name.toLowerCase() : name)
+}
+
+/**
+ * What the settings dialog may store as rf-document: an executable regular file named
+ * rf-document (.cmd/.exe). Main runs this path, so the renderer cannot point it elsewhere.
+ */
+export async function isRfDocumentBinary(file: string): Promise<boolean> {
+  return isRfDocumentName(file) && (await isExecutableFile(file))
+}

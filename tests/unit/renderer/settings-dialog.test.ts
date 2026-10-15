@@ -1,11 +1,14 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  droppedFields,
   isAbsolutePath,
   openSettings,
   parseFactor,
   type SettingsDialogDeps,
+  StatusTimeout,
   statusLines,
+  withTimeout,
 } from '../../../src/renderer/ui/settings'
 import type { Settings, SettingsStatus } from '../../../src/shared/types'
 
@@ -158,6 +161,51 @@ describe('settings dialog', () => {
     void openSettings(deps({ status: Promise.reject(new Error('x')) }))
     await flush()
     expect($('settings-status-rfd').textContent).toBe('Status nicht verfügbar')
+  })
+
+  it('says so when the status does not arrive in time', async () => {
+    void openSettings(deps({ status: Promise.reject(new StatusTimeout(10_000)) }))
+    await flush()
+    expect($('settings-status-rfd').textContent).toBe(
+      'Status nicht verfügbar (keine Antwort nach 10 s)',
+    )
+  })
+})
+
+describe('withTimeout', () => {
+  afterEach(() => vi.useRealTimers())
+
+  it('passes a timely result through', async () => {
+    await expect(withTimeout(Promise.resolve(7), 1000)).resolves.toBe(7)
+  })
+
+  it('rejects with StatusTimeout when the promise hangs', async () => {
+    vi.useFakeTimers()
+    const result = withTimeout(new Promise<never>(() => undefined), 10_000)
+    const check = expect(result).rejects.toBeInstanceOf(StatusTimeout)
+    await vi.advanceTimersByTimeAsync(10_000)
+    await check
+  })
+})
+
+describe('droppedFields', () => {
+  it('names every patched value that main did not store', () => {
+    const saved = { ...settings, presentFontFactor: 2 }
+    expect(
+      droppedFields(
+        { rfDocumentPath: '/usr/bin/python3', presentFontFactor: 2, defaultFolder: 'C:\\x' },
+        saved,
+      ),
+    ).toEqual([
+      'Standardordner für neue Notizen: kein gültiger absoluter Pfad',
+      'rf-document: keine ausführbare Datei namens rf-document',
+    ])
+  })
+
+  it('is empty when everything was stored', () => {
+    expect(
+      droppedFields({ headerDefault: 'titleblock' }, { ...settings, headerDefault: 'titleblock' }),
+    ).toEqual([])
   })
 })
 

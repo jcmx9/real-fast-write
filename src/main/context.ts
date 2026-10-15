@@ -18,7 +18,7 @@ import { rfDocumentVersion, runRfDocument } from './export'
 import { canonicalPath, canonicalPaths, sameFile } from './files'
 import { fontDir, fontStatus } from './fonts'
 import { FullScreenOwner } from './fullscreen'
-import { isExecutableFile, locateRfDocument } from './locate'
+import { isExecutableFile, isRfDocumentBinary, locateRfDocument } from './locate'
 import { buildMenuTemplate, PresentKeyGuard } from './menu'
 import {
   DEFAULT_SESSION,
@@ -271,11 +271,19 @@ export class AppContext {
   /**
    * Validates a patch from the settings dialog, persists the result and applies it: the next
    * export locates rf-document again, new notes go to the new default folder and the snippet
-   * list reads the new folder. Existing files are never moved or deleted.
+   * list reads the new folder. Existing files are never moved or deleted. Rejected values
+   * keep the current ones; the dialog compares the result with its patch and says so.
    */
   updateSettings(patch: unknown): Promise<Settings> {
     const run = this.settingsQueue.then(async () => {
       const next = settingsPatch(this.settings, patch)
+      // main executes this path: a changed one must be an executable named rf-document.
+      if (
+        next.rfDocumentPath !== '' &&
+        next.rfDocumentPath !== this.settings.rfDocumentPath &&
+        !(await isRfDocumentBinary(next.rfDocumentPath))
+      )
+        next.rfDocumentPath = this.settings.rfDocumentPath
       await saveJson(this.file('settings.json'), next)
       if (next.rfDocumentPath !== this.settings.rfDocumentPath) this.rfDocument = null
       this.settings = next

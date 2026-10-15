@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, realpath, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, realpath, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -99,6 +99,39 @@ describe('settings:update', () => {
     expect(await ctx.exportPdf(note)).toEqual({ kind: 'ok', message: 'zweiter' })
   })
 
+  it('accepts an rf-document path only for an executable file named rf-document', async () => {
+    const dir = await mkdtemp(join(root, 'bin-'))
+    const good = await makeFakeRfDocument(dir)
+    const other = join(dir, process.platform === 'win32' ? 'evil.cmd' : 'evil')
+    await writeFile(other, process.platform === 'win32' ? '@echo off\r\n' : '#!/bin/sh\n')
+    await chmod(other, 0o755)
+    const folder = join(dir, 'rf-document-folder', 'rf-document')
+    await mkdir(folder, { recursive: true })
+    const missing = join(dir, 'missing', 'rf-document')
+    for (const bad of [other, folder, missing]) {
+      const next = (await invoke(Ch.updateSettings, { rfDocumentPath: bad })) as Settings
+      expect(next.rfDocumentPath).toBe('')
+    }
+    if (process.platform !== 'win32') {
+      const plain = join(dir, 'plain')
+      await mkdir(plain)
+      const notExecutable = join(plain, 'rf-document')
+      await writeFile(notExecutable, '#!/bin/sh\n')
+      await chmod(notExecutable, 0o644)
+      const next = (await invoke(Ch.updateSettings, { rfDocumentPath: notExecutable })) as Settings
+      expect(next.rfDocumentPath).toBe('')
+    }
+    const ok = (await invoke(Ch.updateSettings, { rfDocumentPath: good.bin })) as Settings
+    expect(ok.rfDocumentPath).toBe(good.bin)
+    // A rejected change keeps the previous valid path.
+    const kept = (await invoke(Ch.updateSettings, { rfDocumentPath: other })) as Settings
+    expect(kept.rfDocumentPath).toBe(good.bin)
+    expect(await stored()).toMatchObject({ rfDocumentPath: good.bin })
+    // Empty = locate automatically, always allowed.
+    const auto = (await invoke(Ch.updateSettings, { rfDocumentPath: '' })) as Settings
+    expect(auto.rfDocumentPath).toBe('')
+  })
+
   it('a snippet folder change is what listSnippets reads', async () => {
     const snippets = join(root, 'Bausteine')
     await mkdir(snippets)
@@ -123,8 +156,11 @@ describe('settings:get-status', () => {
   })
 
   it('reports a configured but missing rf-document as found elsewhere or not at all', async () => {
-    const missing = join(root, 'gibt-es-nicht')
-    await invoke(Ch.updateSettings, { rfDocumentPath: missing })
+    // Only a hand-edited settings.json can name a missing file; the dialog refuses it.
+    const missing = join(root, 'gibt-es-nicht', 'rf-document')
+    await writeFile(join(userData, 'settings.json'), JSON.stringify({ rfDocumentPath: missing }))
+    await ctx.load()
+    expect(ctx.settings.rfDocumentPath).toBe(missing)
     const status = (await invoke(Ch.settingsStatus)) as SettingsStatus
     expect(status.rfDocument.path).not.toBe(missing)
     if (status.rfDocument.path === null) expect(status.rfDocument.version).toBeNull()

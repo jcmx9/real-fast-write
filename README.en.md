@@ -79,7 +79,7 @@ curl -fsSL https://raw.githubusercontent.com/jcmx9/real-fast-write/dev/scripts/b
 
 ## Settings
 
-„Einstellungen …“ (macOS Cmd+, in the app menu, otherwise Ctrl+, in the „Datei“ menu) opens the dialog: default folder for new notes, snippet folder, path to rf-document (empty = locate automatically), font factor in presentation mode and the default for the YAML header in the preview (as YAML or as title block). A read-only status block shows whether rf-document and the fonts were found. Changing the default folder never moves or deletes files.
+„Einstellungen …“ (macOS Cmd+, in the app menu, otherwise Ctrl+, in the „Datei“ menu) opens the dialog: default folder for new notes, snippet folder, path to rf-document (empty = locate automatically), font factor in presentation mode and the default for the YAML header in the preview (as YAML or as title block). A read-only status block shows whether rf-document and the fonts were found. Changing the default folder never moves or deletes files. As rf-document, only an executable file named `rf-document` (Windows `rf-document.cmd`/`.exe`) is accepted; rf-write names values it did not take after saving, and the previous value stays in effect for them.
 
 ## Usage
 
