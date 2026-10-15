@@ -1,7 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { expect, test } from '@playwright/test'
-import { clickMenu, launch, MOD, makeDirs, typeInEditor, waitForFile } from './helpers'
+import { expect } from '@playwright/test'
+import { clickMenu, launch, MOD, makeDirs, test, typeInEditor, waitForFile } from './helpers'
 
 const webContents = (
   app: import('@playwright/test').ElectronApplication,

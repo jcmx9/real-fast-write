@@ -1,7 +1,12 @@
 import { mkdir, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { type ElectronApplication, _electron as electron, type Page } from '@playwright/test'
+import {
+  test as base,
+  type ElectronApplication,
+  _electron as electron,
+  type Page,
+} from '@playwright/test'
 
 export const MOD = process.platform === 'darwin' ? 'Meta' : 'Control'
 
@@ -10,6 +15,39 @@ export interface Dirs {
   notes: string
   userData: string
 }
+
+const launched: ElectronApplication[] = []
+
+/**
+ * Drop-in replacement for Playwright's `test`: every app started via `launch` is traced,
+ * and the trace is written to test-results/traces/<test title>.zip only when the test failed.
+ * (The built-in `use.trace` does not apply to apps started with `_electron.launch`.)
+ */
+export const test = base.extend<{ electronTraces: undefined }>({
+  electronTraces: [
+    // biome-ignore lint/correctness/noEmptyPattern: Playwright requires a destructuring pattern here
+    async ({}, use, testInfo) => {
+      launched.length = 0
+      await use(undefined)
+      const failed = testInfo.status !== testInfo.expectedStatus
+      const name = testInfo.titlePath
+        .slice(1)
+        .join(' ')
+        .replace(/[^\w.-]+/g, '_')
+        .slice(0, 120)
+      let index = 0
+      for (const app of launched.splice(0)) {
+        const path = join('test-results', 'traces', `${name}${index++ ? `-${index}` : ''}.zip`)
+        try {
+          await app.context().tracing.stop(failed ? { path } : undefined)
+        } catch {
+          // app already closed by the test: nothing to stop
+        }
+      }
+    },
+    { auto: true },
+  ],
+})
 
 export interface Launched extends Dirs {
   app: ElectronApplication
@@ -44,6 +82,8 @@ export async function launch(
     string
   >
   const app = await electron.launch({ args: ['.', ...(opts.args ?? [])], env })
+  await app.context().tracing.start({ screenshots: true, snapshots: true })
+  launched.push(app)
   const page = await app.firstWindow()
   await page.locator('.cm-editor').waitFor()
   await page.locator('[data-testid=tab]').first().waitFor()

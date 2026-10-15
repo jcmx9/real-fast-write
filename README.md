@@ -13,7 +13,7 @@
 
 ## Status
 
-In Entwicklung. Vorhanden: Tabs, Autosave mit atomarem Schreiben, Umbenennen, Wiederherstellen der Sitzung, Erkennen externer Änderungen und PDF-Export über rf-document sowie die PDF-Optik in der Vorschau. Der Präsentationsmodus (Vollbild, größerer Text, Infozeile) und Snippets sind verfügbar. Noch nicht vorhanden: die Installation per Einzeiler.
+In Entwicklung. Vorhanden: Tabs, Autosave mit atomarem Schreiben, Umbenennen, Wiederherstellen der Sitzung, Erkennen externer Änderungen (auch gelöschte oder nicht lesbare Notizen, ohne stilles Überschreiben) und PDF-Export über rf-document sowie die PDF-Optik in der Vorschau. Der Präsentationsmodus (Vollbild, größerer Text, Infozeile) und Snippets sind verfügbar. Noch nicht vorhanden: die Installation per Einzeiler.
 
 ## Voraussetzungen (Entwicklung)
 

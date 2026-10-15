@@ -5,6 +5,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- A note opened under two path spellings (symlink, case, 8.3 name) uses one tab
+- External changes that are not UTF-8 or delete the note are reported and never silently overwritten
+- A failed folder watcher re-arms itself
+- Closing while typing saves every keystroke or asks
+- Present recovers when the OS refuses fullscreen; fast toggles keep the last intent
+
 ### Added
 - Outline sidebar with H1/H2, folding in sync with the editor, per-mode visibility
 - Insert a page break (`<!-- pagebreak -->`) from the Edit menu or with Mod+Enter

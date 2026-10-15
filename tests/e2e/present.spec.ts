@@ -1,7 +1,7 @@
 import { copyFile, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { type ElectronApplication, expect, test } from '@playwright/test'
-import { clickMenu, launch, makeDirs, shot, waitForFile } from './helpers'
+import { type ElectronApplication, expect } from '@playwright/test'
+import { clickMenu, launch, makeDirs, shot, test, waitForFile } from './helpers'
 
 const FIXTURE = join(__dirname, '..', 'fixtures', 'preview.md')
 const linux = process.platform === 'linux'

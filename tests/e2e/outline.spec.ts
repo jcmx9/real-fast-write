@@ -1,7 +1,7 @@
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { expect, type Page, test } from '@playwright/test'
-import { clickMenu, launch, makeDirs, shot, waitForFile } from './helpers'
+import { expect, type Page } from '@playwright/test'
+import { clickMenu, launch, makeDirs, shot, test, waitForFile } from './helpers'
 
 const NOTE = [
   '# Alpha',

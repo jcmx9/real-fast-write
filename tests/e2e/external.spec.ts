@@ -1,7 +1,7 @@
 import { access, chmod, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { expect, test } from '@playwright/test'
-import { clickMenu, launch, makeDirs, typeInEditor, waitForFile } from './helpers'
+import { expect } from '@playwright/test'
+import { clickMenu, launch, makeDirs, test, typeInEditor, waitForFile } from './helpers'
 
 const tabs = (page: import('@playwright/test').Page) => page.locator('[data-testid=tab]')
 

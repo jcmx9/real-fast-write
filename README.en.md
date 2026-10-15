@@ -13,7 +13,7 @@
 
 ## Status
 
-In development. Available: tabs, autosave with atomic writes, rename, session restore, detection of external changes and PDF export via rf-document, and the PDF look in the preview. Presentation mode (fullscreen, larger text, info line) and snippets are available. Not yet available: one-line installation.
+In development. Available: tabs, autosave with atomic writes, rename, session restore, detection of external changes (including deleted or unreadable notes, never silently overwritten) and PDF export via rf-document, and the PDF look in the preview. Presentation mode (fullscreen, larger text, info line) and snippets are available. Not yet available: one-line installation.
 
 ## Prerequisites (development)
 
