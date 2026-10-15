@@ -96,9 +96,16 @@ test('select all still reaches the editor when a button has focus', async () => 
   await app.close()
 })
 
-test('closing while typing saves every keystroke typed before the freeze', async () => {
+/**
+ * Types without pause, triggers `stop` in main, and checks that the file holds exactly the
+ * editor text at the freeze (the renderer's last report before the window disappeared).
+ */
+async function typeUntilGone(
+  name: string,
+  stop: (app: import('@playwright/test').ElectronApplication) => Promise<void>,
+): Promise<void> {
   const dirs = await makeDirs()
-  const file = join(dirs.notes, 'schnell.md')
+  const file = join(dirs.notes, name)
   await writeFile(file, 'Start')
   const { app, page } = await launch({ dirs, args: [file] })
   // The renderer reports the editor text when input freezes and when the page unloads; the
@@ -129,9 +136,7 @@ test('closing while typing saves every keystroke typed before the freeze', async
     }
   })()
   await new Promise((r) => setTimeout(r, 400))
-  await app.evaluate(({ BrowserWindow }) => {
-    BrowserWindow.getAllWindows()[0]?.close()
-  })
+  await stop(app)
   await closed
   await typing
   const last = reports.at(-1)
@@ -139,4 +144,21 @@ test('closing while typing saves every keystroke typed before the freeze', async
   expect(last?.length).toBeGreaterThan('Start w0'.length)
   expect(await readFile(file, 'utf8')).toBe(last)
   await app.close().catch(() => {})
+}
+
+test('closing while typing saves every keystroke typed before the freeze', async () => {
+  await typeUntilGone('schnell.md', (app) =>
+    app.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0]?.close()
+    }),
+  )
+})
+
+test('quitting the app (Cmd+Q path) while typing saves every keystroke typed before the freeze', async () => {
+  // app.quit() goes through before-quit and the same beforeClose handshake as the menu's Quit.
+  await typeUntilGone('quit.md', (app) =>
+    app.evaluate(({ app: electronApp }) => {
+      electronApp.quit()
+    }),
+  )
 })
