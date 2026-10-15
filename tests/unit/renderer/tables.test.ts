@@ -2,7 +2,7 @@
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { ensureSyntaxTree } from '@codemirror/language'
 import { EditorState } from '@codemirror/state'
-import type { EditorView, WidgetType } from '@codemirror/view'
+import { EditorView, type WidgetType } from '@codemirror/view'
 import { describe, expect, it } from 'vitest'
 import { Frontmatter } from '../../../src/renderer/editor/frontmatter'
 import { splitRow, tableField, tableModel } from '../../../src/renderer/editor/tables'
@@ -36,7 +36,8 @@ describe('splitRow', () => {
   it.each([
     ['| a | b |', ['a', 'b']],
     ['a | b', ['a', 'b']],
-    ['| `a|b` | c |', ['`a|b`', 'c']],
+    ['| `a|b` | c |', ['`a', 'b`', 'c']],
+    ['| 5` | x | y |', ['5`', 'x', 'y']],
     ['| a \\| b | c |', ['a | b', 'c']],
     ['| | x |', ['', 'x']],
   ])('%j', (row, cells) => expect(splitRow(row)).toEqual(cells))
@@ -61,12 +62,53 @@ describe('tableModel', () => {
     ])
     expect(m.aligns).toEqual(['right', 'right'])
   })
+  it('right-aligns thin-space and plain-space thousands', () => {
+    expect(
+      tableModel(['| x |', '|---|', '| 1 200 \u20ac |', '| 3\u20092\u00a0000 |']).aligns,
+    ).toEqual(['right'])
+  })
   it('mixed text column stays left', () => {
     expect(tableModel(['| x |', '|---|', '| 1 |', '| zwei |']).aligns).toEqual(['left'])
   })
 })
 
 describe('tableField', () => {
+  it('keeps tables inside blockquotes and list items raw', () => {
+    const quote = '> | a | b |\n> |---|---|\n> | 1 | 2 |\n\nende'
+    const list = '- | a | b |\n  |---|---|\n  | 1 | 2 |\n\nende'
+    expect(tables(make(quote, quote.length))).toEqual([])
+    expect(tables(make(list, list.length))).toEqual([])
+  })
+  it('click switches to Markdown; secondary button does nothing', () => {
+    const doc = `Text\n\n${TABLE}\n\nende`
+    const parent = document.createElement('div')
+    document.body.append(parent)
+    const view = new EditorView({
+      parent,
+      state: EditorState.create({
+        doc,
+        selection: { anchor: doc.length },
+        extensions: [markdown({ base: markdownLanguage, extensions: [Frontmatter] }), tableField],
+      }),
+    })
+    ensureSyntaxTree(view.state, doc.length, 5000)
+    view.dispatch({})
+    const start = doc.indexOf('| Produkt')
+    const wrap = () => view.dom.querySelector('.rf-table-wrap') as HTMLElement
+    expect(wrap()).not.toBeNull()
+    wrap().dispatchEvent(
+      new MouseEvent('mousedown', { button: 2, bubbles: true, cancelable: true }),
+    )
+    expect(view.state.selection.main.head).toBe(doc.length)
+    wrap().dispatchEvent(
+      new MouseEvent('mousedown', { button: 0, bubbles: true, cancelable: true }),
+    )
+    expect(view.state.selection.main.head).toBe(start)
+    expect(tables(view.state)).toEqual([])
+    expect(view.state.doc.toString()).toBe(doc)
+    view.destroy()
+  })
+
   it('replaces the table by a widget when the cursor is elsewhere', () => {
     const doc = `Text\n\n${TABLE}\n\nende`
     const t = tables(make(doc, doc.length))

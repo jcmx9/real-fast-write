@@ -25,7 +25,10 @@ export function renderInline(text: string, parent: HTMLElement): void {
     let pos = from
     for (let c = node.firstChild; c; c = c.nextSibling) {
       if (c.from > pos) into.append(text.slice(pos, c.from))
-      if (MARKS.has(c.name) || (c.name === 'URL' && node.name === 'Link')) {
+      if (
+        MARKS.has(c.name) ||
+        (c.name === 'URL' && (node.name === 'Link' || node.name === 'Image'))
+      ) {
         pos = c.to
         continue
       }

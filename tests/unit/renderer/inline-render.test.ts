@@ -28,6 +28,11 @@ describe('renderInline', () => {
     expect(el.querySelector('img, b')).toBeNull()
     expect(el.textContent).toBe('<img src=x onerror=alert(1)> & <b>x</b>')
   })
+  it('renders images as their alt text, not as links', () => {
+    const el = render('![alt](pic.png)')
+    expect(el.textContent).toBe('alt')
+    expect(el.querySelector('.rf-link')).toBeNull()
+  })
   it('nests', () => {
     expect(render('**fett *und kursiv***').querySelector('strong em')?.textContent).toBe(
       'und kursiv',

@@ -12,16 +12,15 @@ export interface TableModel {
 
 /** rf-document's number/amount test (template.typ number-re). */
 const NUMBER_RE =
-  /^[+\-−]?\s*(?:[€$£]\s*)?[0-9][0-9.,'   ]*(?:\s*(?:%|€|\$|£|EUR|CHF|USD|Std\.?|h|Tage?|Stk\.?))?$/
+  /^[+\-\u2212]?\s*(?:[\u20ac$\u00a3]\s*)?[0-9][0-9.,'\u2009\u00a0 ]*(?:\s*(?:%|\u20ac|\$|\u00a3|EUR|CHF|USD|Std\.?|h|Tage?|Stk\.?))?$/
 
-/** Splits a GFM table row; `\|` and pipes inside code spans stay in the cell. */
+/** Splits a GFM table row; only `\|` stays in the cell (like GFM, pipes in code spans split). */
 export function splitRow(text: string): string[] {
   let t = text.trim()
   if (t.startsWith('|')) t = t.slice(1)
   if (t.endsWith('|') && !t.endsWith('\\|')) t = t.slice(0, -1)
   const out: string[] = []
   let cur = ''
-  let inCode = false
   for (let i = 0; i < t.length; i++) {
     const ch = t[i]
     if (ch === '\\' && t[i + 1] === '|') {
@@ -29,8 +28,7 @@ export function splitRow(text: string): string[] {
       i++
       continue
     }
-    if (ch === '`') inCode = !inCode
-    if (ch === '|' && !inCode) {
+    if (ch === '|') {
       out.push(cur.trim())
       cur = ''
       continue
@@ -116,6 +114,8 @@ function build(state: EditorState): DecorationSet {
     enter: (n) => {
       if (n.name === 'Frontmatter') return false
       if (n.name !== 'Table') return undefined
+      for (let a = n.node.parent; a; a = a.parent)
+        if (a.name === 'Blockquote' || a.name === 'ListItem') return false
       const from = doc.lineAt(n.from).from
       const to = doc.lineAt(Math.max(n.from, n.to - 1)).to
       const touched = state.selection.ranges.some((r) => r.from <= to && r.to >= from)
