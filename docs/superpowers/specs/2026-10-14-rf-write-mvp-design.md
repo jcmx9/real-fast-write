@@ -69,6 +69,15 @@ There is exactly one window. All modes share one `EditorView` and one document p
 
 Zoom is stored separately for Edit and Present. In Edit, 100 % equals the PDF's 10 pt body size on screen. Zoom only scales the CSS; it is not Electron page zoom.
 
+### Outline
+
+- A sidebar on the right lists the note's H1 and H2 headings (H2 indented under its H1). It is available in Code, Preview and Present and is toggled with „Gliederung ein/aus“ (View menu, Mod+Shift+O). The on/off state is kept **per mode** (Edit, Present) in the session.
+- Each entry with a non-empty section has a `>` chevron. It folds or unfolds that section in the text; an H1's H2 entries are hidden while the H1 is folded. Outline and editor folds are always in sync: folding from the menu, the keyboard or „Alle ein-/ausklappen“ updates the outline, and the chevron folds the text.
+- Clicking an entry scrolls to the heading and puts the cursor at its end; a folded section stays folded; focus returns to the text.
+- The entry of the section containing the cursor is highlighted.
+- Entries never wrap: the sidebar fits the longest entry (at least about 14 characters, at most a third of the window); longer entries end in „…“ with the full text as a tooltip.
+- The sidebar uses the chrome font and does not scale with the text zoom.
+
 ## 5. Preview rendering
 
 - The decorations come from the Lezer syntax tree and are recomputed for the visible ranges only.
@@ -110,7 +119,7 @@ Zoom is stored separately for Edit and Present. In Edit, 100 % equals the PDF's 
 
 ## 7. Session and start
 
-- The session is stored in the app data folder and covers open tab paths, active tab, view, header toggles and zoom per mode. The app always starts in Edit, never in fullscreen Present.
+- The session is stored in the app data folder and covers open tab paths, active tab, view, header toggles, zoom and outline visibility per mode. The app always starts in Edit, never in fullscreen Present.
 - `rf-write` without an argument restores the session. An empty session opens a new note.
 - `rf-write file.md` restores the session and opens or focuses `file.md`.
 - **Single instance:** a second start hands its arguments to the running window (`requestSingleInstanceLock` / `second-instance`, macOS `open-file`).
@@ -167,6 +176,7 @@ Zoom is stored separately for Edit and Present. In Edit, 100 % equals the PDF's 
 | | YAML header show/hide | Mod+Shift+H |
 | | Fold / unfold section | macOS Cmd+Alt+[ / ], else Ctrl+Shift+[ / ] |
 | | Fold all / unfold all | macOS Ctrl+Alt+[ / ], else Alt+0 / Alt+Shift+0 (Ctrl+Alt is AltGr there and types `[` / `]`) |
+| | Outline show/hide | Mod+Shift+O |
 | | Zoom in / out / 100 % | Mod+Plus (also Mod+= ) / Mod+- / Mod+0 |
 | Window | Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab, Mod+1…9 |
 
