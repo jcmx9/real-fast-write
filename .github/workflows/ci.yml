@@ -125,9 +125,14 @@ jobs:
           set -euo pipefail
           version="$(node -p "require('./package.json').version")"
           image="dist/rf-write-${version}-linux-x86_64.AppImage"
-          chmod +x "${image}"
-          # No FUSE on the runner: the AppImage runtime extracts to a temp dir and runs from there.
-          out="$(APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a "${image}" --version)"
+          # Like the bootstrap: extract once (no FUSE; APPIMAGE_EXTRACT_AND_RUN would print
+          # the file list to stdout), then run the executable directly.
+          dest="${RUNNER_TEMP}/rf-write-appimage"
+          rm -rf "${dest}" && mkdir -p "${dest}"
+          cp "${image}" "${dest}/rf-write.AppImage"
+          chmod +x "${dest}/rf-write.AppImage"
+          (cd "${dest}" && ./rf-write.AppImage --appimage-extract >/dev/null)
+          out="$(LD_LIBRARY_PATH="${dest}/squashfs-root/usr/lib" xvfb-run -a "${dest}/squashfs-root/real-fast-write" --version)"
           echo "${out}"
           [ "${out}" = "rf-write ${version}" ]
 
@@ -190,10 +195,8 @@ jobs:
 
       - name: Bootstrap install / update / uninstall (Linux)
         if: runner.os == 'Linux'
+        # The bootstrap extracts the AppImage (no FUSE); --version still needs a display.
         run: xvfb-run -a bash scripts/test-bootstrap.sh
-        env:
-          # No FUSE on the runner: the AppImage runtime extracts to a temp dir and runs from there.
-          APPIMAGE_EXTRACT_AND_RUN: '1'
 
       - name: Bootstrap install / update / uninstall (Windows PowerShell 5.1)
         if: runner.os == 'Windows'

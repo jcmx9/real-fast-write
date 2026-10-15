@@ -146,7 +146,7 @@ function global:Invoke-WebRequest {
     if ($target -ne (Join-Path $installDir 'rf-write.exe')) { Fail "shortcut points to '$target'" }
     $out = (& $cmdPath --version | Out-String).Trim()
     if ($out -ne "rf-write $version") { Fail "--version printed '$out', expected 'rf-write $version'" }
-    $leftovers = @(Get-ChildItem -LiteralPath (Split-Path -Parent $installDir) -Force | Where-Object { $_.Name -like '*.old' -or $_.Name -like '.*-new.*' })
+    $leftovers = @(Get-ChildItem -LiteralPath (Split-Path -Parent $installDir) -Force | Where-Object { $_.Name -like '*.old' -or $_.Name -like '*.old-*' -or $_.Name -like '.*-new.*' })
     if ($leftovers.Count -gt 0) { Fail "leftover staging/.old folders: $(($leftovers | ForEach-Object { $_.Name }) -join ', ')" }
   }
 
@@ -204,17 +204,18 @@ function global:Invoke-WebRequest {
   Assert-Installed
   Pass 'broken archive -> exit 6, old install intact'
 
-  # 5. Leftover .old: an own one is cleared on update, a foreign one stops the update.
+  # 5. Leftover .old: an own one is cleared on update; a foreign one does not block the
+  #    update (the live folder is renamed to a unique .old-<id>) and stays untouched.
   New-OwnedOld
   Assert-Code (Invoke-Bootstrap @()) 0 'update with own .old'
   Assert-Installed
   New-Item -ItemType Directory -Force -Path $oldDir | Out-Null
   Set-Content -LiteralPath (Join-Path $oldDir 'keep.txt') -Value 'keep' -Encoding Ascii
-  Assert-Code (Invoke-Bootstrap @()) 1 'update with foreign .old'
+  Assert-Code (Invoke-Bootstrap @()) 0 'update with foreign .old'
   if (-not (Test-Path -LiteralPath (Join-Path $oldDir 'keep.txt'))) { Fail 'update deleted a foreign .old' }
   Remove-Item -LiteralPath $oldDir -Recurse -Force
   Assert-Installed
-  Pass 'leftover .old: own one removed on update, foreign one -> exit 1 and kept'
+  Pass 'leftover .old: own one removed on update, foreign one kept (update proceeds)'
   Remove-Item Env:RFW_ARCHIVE
 
   # 6. Download path against the fake GitHub.
@@ -256,15 +257,23 @@ function global:Invoke-WebRequest {
   Assert-Installed
   Pass '-Version with bad checksum -> exit 5, install intact'
 
-  # 7. Uninstall while rf-write.exe is open: nothing is removed.
+  # 7. Uninstall and update while rf-write.exe is open: refused before anything is touched
+  #    (marker, launcher, shortcut and every file stay; no .old-* is left behind).
+  $before = @(Get-ChildItem -LiteralPath $installDir -Recurse -Force | ForEach-Object { $_.FullName }).Count
   $handle = [IO.File]::Open((Join-Path $installDir 'rf-write.exe'), 'Open', 'Read', 'Read')
   try {
     Assert-Code (Invoke-Bootstrap @('-Uninstall')) 12 'uninstall while running'
+    $env:RFW_ARCHIVE = $Archive
+    $code = Invoke-Bootstrap @()
+    Remove-Item Env:RFW_ARCHIVE
+    Assert-Code $code 12 'update while running'
   } finally {
     $handle.Close()
   }
+  $after = @(Get-ChildItem -LiteralPath $installDir -Recurse -Force | ForEach-Object { $_.FullName }).Count
+  if ($after -ne $before) { Fail "files changed while refusing: $before before, $after after" }
   Assert-Installed
-  Pass 'uninstall while rf-write.exe is in use -> exit 12, nothing removed'
+  Pass 'uninstall/update while rf-write.exe is in use -> exit 12, nothing changed'
 
   # 8. Uninstall (script-block form with -Uninstall) removes launcher, shortcut, install
   #    folder and an own .old, never follows a junction out of the folder, and leaves

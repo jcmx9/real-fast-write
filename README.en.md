@@ -40,10 +40,10 @@ The script downloads the matching archive of the latest stable GitHub release, v
 | System | Application | Command |
 |--------|-------------|---------|
 | macOS | `~/Applications/rf-write.app` | `~/.local/bin/rf-write` |
-| Linux | `~/.local/share/real-fast-write/rf-write.AppImage` and `~/.local/share/applications/rf-write.desktop` | `~/.local/bin/rf-write` |
+| Linux | `~/.local/share/real-fast-write/app/` (extracted AppImage) and `~/.local/share/applications/rf-write.desktop` | `~/.local/bin/rf-write` |
 | Windows | `%LOCALAPPDATA%\real-fast-write\` and a Start-menu shortcut | `%LOCALAPPDATA%\Microsoft\WindowsApps\rf-write.cmd` (already on PATH) |
 
-The app is unsigned. On macOS it is ad-hoc signed and the script removes the quarantine flag, so Gatekeeper does not block it. On Windows, SmartScreen may warn. On Linux the AppImage needs `libfuse2`. On Ubuntu 24.04 and newer, AppArmor blocks unprivileged user namespaces and rf-write does not start; the script warns in that case and names the remedy (`kernel.apparmor_restrict_unprivileged_userns=0`, needs sudo). The launch log is at `~/.local/share/real-fast-write/launch.log`.
+The app is unsigned. On macOS it is ad-hoc signed and the script removes the quarantine flag, so Gatekeeper does not block it. On Windows, SmartScreen may warn. On Linux the script extracts the AppImage once, so `libfuse2` is not needed. On Ubuntu 24.04 and newer, AppArmor blocks the unprivileged user namespaces Electron's sandbox needs, and rf-write does not start; the script warns in that case and prints an AppArmor profile for rf-write only (creating it needs sudo). The launch log is at `~/.local/share/real-fast-write/launch.log`.
 
 ## Update
 

@@ -13,15 +13,16 @@
 #   macOS: ~/Applications/rf-write.app
 #          (Marker ~/.local/share/real-fast-write/.rf-write-install, außerhalb der
 #          signierten App; Inhalt: Pfad der App)
-#   Linux: ~/.local/share/real-fast-write/rf-write.AppImage
-#          + ~/.local/share/applications/rf-write.desktop
+#   Linux: ~/.local/share/real-fast-write/app/ (das AppImage einmal entpackt: startet
+#          ohne FUSE/libfuse2 und schneller) + ~/.local/share/applications/rf-write.desktop
 #   Befehl: ~/.local/bin/rf-write (Startprotokoll: ~/.local/share/real-fast-write/launch.log)
 # Fehlt rf-document, wird dessen eigener Bootstrap ausgeführt.
 #
 # Umgebung (für Tests):
 #   RFW_ARCHIVE  lokales Archiv statt Download (keine Prüfsumme)
 #   RFW_HOME     Installordner (macOS: Ordner, der rf-write.app enthält – dort liegen
-#                dann auch Marker und Startprotokoll; Linux: Ordner mit rf-write.AppImage)
+#                dann auch Marker und Startprotokoll; Linux: statt
+#                ~/.local/share/real-fast-write, die App liegt dann in RFW_HOME/app)
 #
 # Exit-Codes:
 #   0 ok                          1 Sicherheitsabbruch (keine rf-write-Installation)
@@ -53,6 +54,8 @@ readonly marker_name=".rf-write-install"
 readonly bundle_id="io.github.jcmx9.rfwrite"
 readonly launcher_tag="# rf-write launcher (real-fast-write bootstrap)"
 readonly desktop_tag="X-RfWrite-Bootstrap=true"
+# electron-builder names the Linux executable after the package name.
+readonly linux_bin="real-fast-write"
 readonly version_re='^[0-9]+\.[0-9]+\.[0-9]+(-dev\.[0-9]+)?$'
 
 say() { echo "→ $*"; }
@@ -120,13 +123,16 @@ detect_platform() {
     install_dir="${home_override:-${HOME}/Applications}/rf-write.app"
     state_dir="${home_override:-${data_home}/real-fast-write}"
     app_exe="${install_dir}/Contents/MacOS/rf-write"
+    marker="${state_dir}/${marker_name}"
   else
-    install_dir="${home_override:-${data_home}/real-fast-write}"
-    state_dir="${install_dir}"
-    app_exe="${install_dir}/rf-write.AppImage"
+    # The AppImage is extracted once: no FUSE needed, faster start. install_dir is the
+    # extracted app (the unit that gets replaced and deleted); the marker lives inside it.
+    state_dir="${home_override:-${data_home}/real-fast-write}"
+    install_dir="${state_dir}/app"
+    app_exe="${install_dir}/${linux_bin}"
+    marker="${install_dir}/${marker_name}"
     desktop_path="${data_home}/applications/rf-write.desktop"
   fi
-  marker="${state_dir}/${marker_name}"
   log_path="${state_dir}/launch.log"
 }
 
@@ -151,14 +157,14 @@ is_elf() {
 
 # True only for an install this bootstrap made (install_dir or its leftover .old).
 # macOS: the marker names this app AND the bundle is rf-write's.
-# Linux: the marker AND an ELF rf-write.AppImage sit in the folder.
+# Linux: the marker AND the extracted ELF executable sit in the folder.
 owns_dir() {
   local dir="$1"
   if [[ "${os}" == "Darwin" ]]; then
     [[ -f "${marker}" && "$(cat "${marker}")" == "${install_dir}" ]] &&
       [[ "$(app_bundle_id "${dir}")" == "${bundle_id}" ]]
   else
-    [[ -f "${dir}/${marker_name}" ]] && is_elf "${dir}/rf-write.AppImage"
+    [[ -f "${dir}/${marker_name}" && -x "${dir}/${linux_bin}" ]] && is_elf "${dir}/${linux_bin}"
   fi
 }
 
@@ -168,7 +174,7 @@ refuse_foreign() {
   if [[ "${os}" == "Darwin" ]]; then
     echo "Error: ${path} existiert, ist aber keine rf-write-Installation dieses Skripts (Marker ${marker} fehlt oder Bundle-ID ≠ ${bundle_id})." >&2
   else
-    echo "Error: ${path} existiert, ist aber keine rf-write-Installation dieses Skripts (Marker ${marker_name} oder rf-write.AppImage fehlt)." >&2
+    echo "Error: ${path} existiert, ist aber keine rf-write-Installation dieses Skripts (Marker ${marker_name} oder ${linux_bin} fehlt)." >&2
   fi
   echo "Gefunden:" >&2
   ls -la "${path}" >&2 || true
@@ -306,31 +312,6 @@ download_release() {
 
 # --- Install ------------------------------------------------------------------
 
-run_limited() {
-  if command -v timeout >/dev/null 2>&1; then
-    timeout 30 "$@"
-  else
-    "$@"
-  fi
-}
-
-# Linux, best effort: copies the AppImage's own icon (.DirIcon) to ${2}. The AppImage
-# runtime extracts without FUSE and without starting the app.
-extract_icon() {
-  local appimage="$1" dest="$2" dir icon target
-  dir="$(mktemp -d "${tmp}/icon.XXXXXX")"
-  (cd "${dir}" && run_limited "${appimage}" --appimage-extract .DirIcon) >/dev/null 2>&1 || return 1
-  icon="${dir}/squashfs-root/.DirIcon"
-  if [[ -L "${icon}" ]]; then
-    target="$(readlink "${icon}")"
-    [[ "${target}" != /* && "${target}" != *..* ]] || return 1
-    (cd "${dir}" && run_limited "${appimage}" --appimage-extract "${target}") >/dev/null 2>&1 || return 1
-    icon="${dir}/squashfs-root/${target}"
-  fi
-  [[ -f "${icon}" && ! -L "${icon}" && "$(head -c 4 "${icon}" | tail -c 3)" == "PNG" ]] || return 1
-  cp "${icon}" "${dest}"
-}
-
 # Builds the new install in a staging folder next to the target (same file system,
 # so the final moves are renames); sets stage_dir (the new install_dir).
 stage_install() {
@@ -355,11 +336,18 @@ stage_install() {
     say "Neue Version: ${out}"
   else
     is_elf "${archive}" || die 6 "Keine gültige AppImage-Datei: ${archive}"
+    # The AppImage runtime extracts itself (no FUSE needed) into ./squashfs-root without
+    # starting the app; the copy keeps the caller's file unchanged and is deleted after.
+    cp "${archive}" "${stage_root}/rf-write.AppImage"
+    chmod 755 "${stage_root}/rf-write.AppImage"
+    (cd "${stage_root}" && ./rf-write.AppImage --appimage-extract) >/dev/null 2>&1 ||
+      die 6 "AppImage lässt sich nicht entpacken: ${archive}"
+    rm -f "${stage_root}/rf-write.AppImage"
     stage_dir="${stage_root}/$(basename "${install_dir}")"
-    mkdir "${stage_dir}"
-    cp "${archive}" "${stage_dir}/rf-write.AppImage"
-    chmod 755 "${stage_dir}/rf-write.AppImage"
-    extract_icon "${stage_dir}/rf-write.AppImage" "${stage_dir}/rf-write.png" || true
+    mv "${stage_root}/squashfs-root" "${stage_dir}"
+    if [[ ! -x "${stage_dir}/${linux_bin}" ]] || ! is_elf "${stage_dir}/${linux_bin}"; then
+      die 6 "AppImage enthält kein ${linux_bin}: ${archive}"
+    fi
     touch "${stage_dir}/${marker_name}"
   fi
 }
@@ -375,8 +363,8 @@ die_recovery() {
 }
 
 # macOS: Electron starts its helpers from the bundle path, so swapping or deleting the
-# bundle under a running app could mix versions or crash it (Linux keeps the mounted
-# AppImage's inode; Windows refuses on its own). Stops with 12, nothing changed.
+# bundle under a running app could mix versions or crash it (Linux keeps the running
+# executable's inodes; Windows refuses on its own). Stops with 12, nothing changed.
 refuse_running() {
   [[ "${os}" == "Darwin" ]] || return 0
   local pattern
@@ -423,9 +411,13 @@ write_launcher() {
   if [[ -e "${command_path}" ]] && ! is_own_file "${command_path}" "${launcher_tag}"; then
     die 1 "${command_path} existiert und stammt nicht von rf-write – bitte selbst entfernen."
   fi
-  local app_q log_q tmp_cmd
+  local app_q log_q tmp_cmd lib_line=""
   app_q="$(printf '%q' "${app_exe}")"
   log_q="$(printf '%q' "${log_path}")"
+  if [[ "${os}" == "Linux" ]]; then
+    # Like the AppImage's AppRun: the bundled libraries (libXss, libXtst, …) come first.
+    lib_line="export LD_LIBRARY_PATH=$(printf '%q' "${install_dir}/usr/lib")\"\${LD_LIBRARY_PATH:+:\${LD_LIBRARY_PATH}}\""
+  fi
   tmp_cmd="$(mktemp "${bin_dir}/.rf-write.XXXXXX")"
   # --version/--help print to the terminal; everything else starts the app detached so the
   # terminal stays free, with its output in a log (truncated per launch) instead of
@@ -437,6 +429,7 @@ ${launcher_tag}
 set -euo pipefail
 app=${app_q}
 log=${log_q}
+${lib_line}
 case "\${1:-}" in
   -V|--version|-h|--help) exec "\${app}" "\$@" ;;
 esac
@@ -461,15 +454,16 @@ write_desktop_entry() {
     return 0
   fi
   local icon_line=""
-  if [[ -f "${install_dir}/rf-write.png" ]]; then
-    icon_line="Icon=$(printf '%s' "${install_dir}/rf-write.png" | sed -e 's/\\/\\\\/g')"
+  if [[ -f "${install_dir}/${linux_bin}.png" ]]; then
+    icon_line="Icon=$(printf '%s' "${install_dir}/${linux_bin}.png" | sed -e 's/\\/\\\\/g')"
   fi
   {
     echo "[Desktop Entry]"
     echo "Type=Application"
     echo "Name=rf-write"
     echo "Comment=Markdown-Editor für real-fast-document"
-    echo "Exec=$(desktop_exec_arg "${app_exe}") %F"
+    # Through the launcher: it sets the library path and logs the start.
+    echo "Exec=$(desktop_exec_arg "${command_path}") %F"
     [[ -z "${icon_line}" ]] || echo "${icon_line}"
     echo "Terminal=false"
     echo "Categories=Office;TextEditor;"
@@ -496,22 +490,25 @@ check_path() {
 
 check_linux_runtime() {
   [[ "${os}" == "Linux" ]] || return 0
-  local libs userns
-  libs="$({ ldconfig -p || /sbin/ldconfig -p; } 2>/dev/null || true)"
-  if ! grep -q 'libfuse\.so\.2' <<<"${libs}"; then
-    warn "libfuse2 nicht gefunden – AppImages brauchen es zum Start."
-    echo "  Debian/Ubuntu: sudo apt install libfuse2t64 (ältere: libfuse2) · Fedora: sudo dnf install fuse-libs" >&2
-  fi
-  # Ubuntu 24.04+ blocks the unprivileged user namespaces Chromium's sandbox needs; an
-  # AppImage then exits right away without a window.
+  # Ubuntu 24.04+ blocks the unprivileged user namespaces Chromium's sandbox needs; the
+  # extracted app then exits right away (its chrome-sandbox fallback is not setuid root).
+  # The narrow fix is an AppArmor profile for this one executable, as Ubuntu ships for
+  # browsers and editors.
+  local userns
   userns="$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || true)"
-  if [[ "${userns}" == "1" ]]; then
-    warn "AppArmor sperrt unprivilegierte User-Namespaces (Ubuntu 24.04+) – rf-write startet so nicht."
-    echo "  Abhilfe (setzt diese Kernel-Härtung systemweit zurück, braucht sudo):" >&2
-    echo "    echo 'kernel.apparmor_restrict_unprivileged_userns=0' | sudo tee /etc/sysctl.d/60-rf-write.conf" >&2
-    echo "    sudo sysctl --system" >&2
-    echo "  Startprotokoll bei Problemen: ${log_path}" >&2
-  fi
+  [[ "${userns}" == "1" ]] || return 0
+  warn "AppArmor sperrt unprivilegierte User-Namespaces (Ubuntu 24.04+) – rf-write startet so nicht."
+  echo "  Abhilfe: ein AppArmor-Profil nur für rf-write anlegen (braucht sudo):" >&2
+  echo "    sudo tee /etc/apparmor.d/rf-write >/dev/null <<'EOF'" >&2
+  echo "    abi <abi/4.0>," >&2
+  echo "    include <tunables/global>" >&2
+  echo "    profile rf-write \"${app_exe}\" flags=(unconfined) {" >&2
+  echo "      userns," >&2
+  echo "      include if exists <local/rf-write>" >&2
+  echo "    }" >&2
+  echo "    EOF" >&2
+  echo "    sudo apparmor_parser -r /etc/apparmor.d/rf-write" >&2
+  echo "  Startprotokoll bei Problemen: ${log_path}" >&2
 }
 
 # Same order as the app (src/main/locate.ts): RF_DOCUMENT, ~/.local/bin, Homebrew, PATH.
@@ -607,12 +604,12 @@ remove_old() {
   fi
 }
 
-# macOS keeps marker and launch log outside the app; drop them (and the default folder
-# if it is now empty). On Linux both live in the install folder.
+# Marker (macOS) and launch log live outside the app; drop them and the state folder
+# if it is now empty (on Linux the marker went with the app folder).
 remove_state() {
-  [[ "${os}" == "Darwin" ]] || return 0
-  rm -f "${marker}" "${log_path}"
-  [[ -n "${RFW_HOME:-}" ]] || rmdir "${state_dir}" 2>/dev/null || true
+  [[ "${os}" != "Darwin" ]] || rm -f "${marker}"
+  rm -f "${log_path}"
+  rmdir "${state_dir}" 2>/dev/null || true
 }
 
 do_uninstall() {

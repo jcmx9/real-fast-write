@@ -66,7 +66,9 @@ try {
     } else {
       $InstallDir = Join-Path $LocalAppData 'real-fast-write'
     }
-    $OldDir    = $InstallDir + '.old'
+    # A unique name per run: the rename of the live folder is the first action and needs
+    # no cleanup before it; leftovers (<leaf>.old, <leaf>.old-*) are cleared afterwards.
+    $OldDir    = $InstallDir + '.old-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
     $Exe       = Join-Path $InstallDir 'rf-write.exe'
     $WinApps   = Join-Path $LocalAppData 'Microsoft\WindowsApps'
     $CmdPath   = Join-Path $WinApps 'rf-write.cmd'
@@ -129,12 +131,14 @@ try {
         (Test-Path -LiteralPath (Join-Path $Dir 'rf-write.exe') -PathType Leaf))
     }
 
-    # Renames a folder; retries because Defender, the indexer or exiting child processes
-    # can hold handles for a moment.
+    # Renames a folder with [IO.Directory]::Move: a pure rename that fails as a whole.
+    # (Move-Item falls back to copy-and-delete for a folder whose rename fails, which
+    # half-moved a running install.) Retries because Defender, the indexer or exiting
+    # child processes can hold handles for a moment.
     function Move-RfwDir([string]$From, [string]$To) {
       for ($attempt = 1; $attempt -le 5; $attempt++) {
         try {
-          Move-Item -LiteralPath $From -Destination $To
+          [IO.Directory]::Move($From, $To)
           return $true
         } catch {
           if ($attempt -lt 5) { Start-Sleep -Milliseconds (300 * $attempt) }
@@ -296,21 +300,24 @@ try {
       return $root
     }
 
-    # Clears a leftover .old from an interrupted run. Only ours may go; a foreign one
-    # stops the run when $Required (its name is needed), else it stays with a warning.
-    function Remove-RfwOld([bool]$Required) {
-      if (-not (Test-Path -LiteralPath $OldDir)) { return }
-      if (Test-RfwOwned $OldDir) {
-        try {
-          Remove-RfwTree $OldDir
-        } catch {
-          Stop-Rfw 12 "Konnte $OldDir nicht loeschen - laeuft rf-write noch? Bitte beenden und erneut versuchen."
+    # Clears leftovers of interrupted runs (<leaf>.old, <leaf>.old-*) after the main work.
+    # Only ours may go; anything else stays with a warning. Never fatal.
+    function Remove-RfwOld {
+      $parent = Split-Path -Parent $InstallDir
+      $leaf = Split-Path -Leaf $InstallDir
+      if (-not (Test-Path -LiteralPath $parent)) { return }
+      $leftovers = @(Get-ChildItem -LiteralPath $parent -Directory -Force | Where-Object { $_.Name -eq "$leaf.old" -or $_.Name -like "$leaf.old-*" })
+      foreach ($dir in $leftovers) {
+        if (Test-RfwOwned $dir.FullName) {
+          try {
+            Remove-RfwTree $dir.FullName
+            Write-Step "Rest eines frueheren Laufs entfernt: $($dir.FullName)"
+          } catch {
+            Write-Warn "Rest eines frueheren Laufs bleibt (in Benutzung?): $($dir.FullName)"
+          }
+        } else {
+          Write-Warn "$($dir.FullName) ist keine rf-write-Installation dieses Skripts - bleibt."
         }
-        Write-Step "Rest eines frueheren Laufs entfernt: $OldDir"
-      } elseif ($Required) {
-        Stop-Foreign $OldDir
-      } else {
-        Write-Warn "$OldDir ist keine rf-write-Installation dieses Skripts - bleibt."
       }
     }
 
@@ -322,9 +329,9 @@ try {
       Stop-Rfw 7 'Bitte die bisherige Version wie oben beschrieben zurueckholen.'
     }
 
-    # Old -> .old, new -> target, delete .old; on failure the old install is restored.
+    # Old -> .old-<id> (first action: fails as a whole while rf-write runs), new -> target,
+    # delete the old one; on failure the old install is restored.
     function Install-RfwStage([string]$Root) {
-      Remove-RfwOld $true
       $hadOld = $false
       if (Test-Path -LiteralPath $InstallDir) {
         if (-not (Move-RfwDir $InstallDir $OldDir)) {
@@ -342,6 +349,7 @@ try {
       if ($hadOld) {
         try { Remove-RfwTree $OldDir } catch { Write-Warn "Alte Version konnte nicht geloescht werden: $OldDir" }
       }
+      Remove-RfwOld
       Remove-RfwTemp
     }
 
@@ -490,14 +498,14 @@ try {
     function Uninstall-Rfw {
       if (-not (Test-Path -LiteralPath $InstallDir)) {
         Write-Host "Nichts zu deinstallieren: $InstallDir existiert nicht."
-        Remove-RfwOld $false
+        Remove-RfwOld
         Remove-RfwEntry
         return
       }
       if (-not (Test-RfwOwned $InstallDir)) { Stop-Foreign $InstallDir }
-      Remove-RfwOld $true
-      # Rename first: it fails as a whole while rf-write has files open, so nothing is
-      # half-deleted. Launcher and shortcut go only after the folder is gone.
+      # Rename first, before anything else is touched: it fails as a whole while rf-write
+      # has files open, so a refusal changes nothing. Leftovers, launcher and shortcut go
+      # only after the folder is gone.
       if (-not (Move-RfwDir $InstallDir $OldDir)) {
         Stop-Rfw 12 'rf-write laeuft noch - bitte beenden und erneut versuchen. Es wurde nichts entfernt.'
       }
@@ -507,6 +515,7 @@ try {
       } catch {
         Stop-Rfw 6 "Konnte $OldDir nicht vollstaendig loeschen ($($_.Exception.Message)). Bitte von Hand entfernen."
       }
+      Remove-RfwOld
       Remove-RfwEntry
       Write-Ok 'rf-write deinstalliert. rf-document, Einstellungen und Notizen bleiben unangetastet.'
     }

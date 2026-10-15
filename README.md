@@ -40,10 +40,10 @@ Das Skript lädt das passende Archiv der neuesten stabilen GitHub-Release, prüf
 | System | Programm | Befehl |
 |--------|----------|--------|
 | macOS | `~/Applications/rf-write.app` | `~/.local/bin/rf-write` |
-| Linux | `~/.local/share/real-fast-write/rf-write.AppImage` und `~/.local/share/applications/rf-write.desktop` | `~/.local/bin/rf-write` |
+| Linux | `~/.local/share/real-fast-write/app/` (entpacktes AppImage) und `~/.local/share/applications/rf-write.desktop` | `~/.local/bin/rf-write` |
 | Windows | `%LOCALAPPDATA%\real-fast-write\` und Startmenü-Verknüpfung | `%LOCALAPPDATA%\Microsoft\WindowsApps\rf-write.cmd` (bereits im PATH) |
 
-Die App ist nicht signiert. Unter macOS ist sie ad-hoc signiert, und das Skript entfernt die Quarantäne-Markierung, sodass Gatekeeper nicht blockiert. Unter Windows kann SmartScreen warnen. Unter Linux braucht das AppImage `libfuse2`. Auf Ubuntu 24.04 und neuer sperrt AppArmor unprivilegierte User-Namespaces, dann startet rf-write nicht; das Skript warnt in diesem Fall und nennt die Abhilfe (`kernel.apparmor_restrict_unprivileged_userns=0`, braucht sudo). Das Startprotokoll liegt unter `~/.local/share/real-fast-write/launch.log`.
+Die App ist nicht signiert. Unter macOS ist sie ad-hoc signiert, und das Skript entfernt die Quarantäne-Markierung, sodass Gatekeeper nicht blockiert. Unter Windows kann SmartScreen warnen. Unter Linux entpackt das Skript das AppImage einmal; `libfuse2` wird daher nicht gebraucht. Auf Ubuntu 24.04 und neuer sperrt AppArmor unprivilegierte User-Namespaces, die Electrons Sandbox braucht, dann startet rf-write nicht; das Skript warnt in diesem Fall und gibt ein AppArmor-Profil nur für rf-write aus (anlegen braucht sudo). Das Startprotokoll liegt unter `~/.local/share/real-fast-write/launch.log`.
 
 ## Update
 

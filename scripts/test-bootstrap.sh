@@ -8,7 +8,8 @@
 # Everything happens below a temp dir with its own HOME: the runner's (or developer's)
 # real ~/Applications, ~/.local/bin and ~/.local/share are never touched. The download
 # path runs against a fake `curl` that serves fixtures, so no network is needed.
-# On Linux without FUSE, run with APPIMAGE_EXTRACT_AND_RUN=1 (and a display, e.g. xvfb-run).
+# On Linux the bootstrap extracts the AppImage (no FUSE needed); `--version` still needs a
+# display there, e.g. xvfb-run.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -68,7 +69,8 @@ case "${os}" in
     marker="${RFW_HOME}/.rf-write-install"
     ;;
   Linux)
-    install_dir="${RFW_HOME}"
+    # The extracted AppImage; the marker lives inside it.
+    install_dir="${RFW_HOME}/app"
     marker="${install_dir}/.rf-write-install"
     ;;
 esac
@@ -107,12 +109,14 @@ assert_installed() {
     [[ -z "$(find "${install_dir}" -name '.rf-write-install')" ]] || fail "marker written into the app bundle"
     codesign --verify --deep --strict "${install_dir}" || fail "code seal of the installed app is broken"
   else
-    [[ -x "${install_dir}/rf-write.AppImage" ]] || fail "AppImage missing"
+    [[ -x "${install_dir}/real-fast-write" ]] || fail "extracted executable missing"
+    [[ -z "$(find "${RFW_HOME}" -name '*.AppImage')" ]] || fail "AppImage file kept after extraction"
+    grep -qF 'LD_LIBRARY_PATH' "${command_path}" || fail "launcher does not set the bundled library path"
     [[ -f "${desktop_path}" ]] || fail ".desktop entry missing"
     grep -q '^MimeType=text/markdown;$' "${desktop_path}" || fail ".desktop lacks MimeType"
-    grep -q "^Exec=\"${install_dir}/rf-write.AppImage\" %F$" "${desktop_path}" || fail ".desktop Exec line"
+    grep -qxF "Exec=\"${command_path}\" %F" "${desktop_path}" || fail ".desktop Exec line"
     if grep -q '^Icon=' "${desktop_path}"; then
-      [[ -f "${install_dir}/rf-write.png" ]] || fail ".desktop Icon without icon file"
+      [[ -f "${install_dir}/real-fast-write.png" ]] || fail ".desktop Icon without icon file"
     fi
   fi
   local out
@@ -131,7 +135,8 @@ make_owned_old() {
       "${old_dir}/Contents/Info.plist" >/dev/null
   else
     touch "${old_dir}/.rf-write-install"
-    printf '\177ELF' >"${old_dir}/rf-write.AppImage"
+    printf '\177ELF' >"${old_dir}/real-fast-write"
+    chmod +x "${old_dir}/real-fast-write"
   fi
 }
 
@@ -361,7 +366,7 @@ expect_code 1 "" with_archive "${archive}"
 [[ -f "${keep}" ]] || fail "install replaced an unmarked folder"
 pass "unmarked folder: uninstall and install refuse (exit 1), folder intact"
 
-# 9. A marker alone is not enough: macOS needs rf-write's bundle ID, Linux the AppImage.
+# 9. A marker alone is not enough: macOS needs rf-write's bundle ID, Linux the executable.
 if [[ "${os}" == "Darwin" ]]; then
   /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string com.example.other" \
     "${install_dir}/Contents/Info.plist" >/dev/null
@@ -373,6 +378,6 @@ expect_code 1 "" run_bootstrap --uninstall
 [[ -f "${keep}" ]] || fail "uninstall deleted a folder that only had a marker"
 expect_code 1 "" with_archive "${archive}"
 [[ -f "${keep}" ]] || fail "install replaced a folder that only had a marker"
-pass "marker without rf-write (foreign bundle ID / no AppImage): refuse (exit 1), folder intact"
+pass "marker without rf-write (foreign bundle ID / no executable): refuse (exit 1), folder intact"
 
 echo "All bootstrap checks passed."
