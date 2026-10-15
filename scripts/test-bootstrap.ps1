@@ -5,7 +5,8 @@
   scripts\test-bootstrap.ps1 [-Archive dist\rf-write-<version>-win-x64.zip]
 
   Runs under Windows PowerShell 5.1 and starts the bootstrap as a separate
-  powershell.exe process (as a file, and once as a script block like "irm | iex").
+  powershell.exe process: as a file, and in the documented one-liner forms ("irm | iex"
+  and the script block with -Uninstall), fed from the local file instead of irm.
   LOCALAPPDATA, APPDATA and RFW_HOME point into a temp folder, so the real profile,
   WindowsApps folder and Start menu are never touched. The download path runs against
   fake Invoke-RestMethod / Invoke-WebRequest functions (they shadow the cmdlets), so no
@@ -179,6 +180,21 @@ function global:Invoke-WebRequest {
   Assert-Installed
   Pass 'update over existing install (script block; RFW_HOME with trailing backslash)'
 
+  # 3b. The documented "irm | iex" one-liner, fed from the local file: it updates, and an
+  #     error throws instead of calling exit, so the user's window stays open.
+  $iex = "Get-Content -Raw -LiteralPath '$bootstrap' | Invoke-Expression"
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command $iex | Out-Host
+  Assert-Code $LASTEXITCODE 0 'update via irm | iex'
+  Assert-Installed
+  $env:RFW_ARCHIVE = Join-Path $work 'missing.zip'
+  $probe = "try { Get-Content -Raw -LiteralPath '$bootstrap' | Invoke-Expression } catch { Write-Host ('caught: ' + `$_.Exception.Message) }; Write-Host 'host still running'; exit 0"
+  $out = (& powershell.exe -NoProfile -ExecutionPolicy Bypass -Command $probe | Out-String)
+  $env:RFW_ARCHIVE = $Archive
+  if ($out -notmatch 'caught: ') { Fail "an error under irm | iex did not throw: $out" }
+  if ($out -notmatch 'host still running') { Fail "the bootstrap under irm | iex ended the host: $out" }
+  Assert-Installed
+  Pass 'irm | iex: update works; an error throws and keeps the window open'
+
   # 4. A broken archive aborts before anything is replaced; the old install keeps working.
   $broken = Join-Path $work 'broken.zip'
   Set-Content -LiteralPath $broken -Value 'not an archive' -Encoding Ascii
@@ -250,14 +266,18 @@ function global:Invoke-WebRequest {
   Assert-Installed
   Pass 'uninstall while rf-write.exe is in use -> exit 12, nothing removed'
 
-  # 8. Uninstall removes launcher, shortcut, install folder and an own .old, never follows a
-  #    junction out of the folder, and leaves rf-document alone.
+  # 8. Uninstall (script-block form with -Uninstall) removes launcher, shortcut, install
+  #    folder and an own .old, never follows a junction out of the folder, and leaves
+  #    rf-document alone.
   $outside = Join-Path $work 'outside'
   New-Item -ItemType Directory -Path $outside | Out-Null
   Set-Content -LiteralPath (Join-Path $outside 'precious.txt') -Value 'keep' -Encoding Ascii
   New-Item -ItemType Junction -Path (Join-Path $installDir 'link') -Target $outside | Out-Null
   New-OwnedOld
-  Assert-Code (Invoke-Bootstrap @('-Uninstall')) 0 'uninstall'
+  # As the documented script-block one-liner with -Uninstall.
+  $block = "& ([scriptblock]::Create((Get-Content -Raw -LiteralPath '$bootstrap'))) -Uninstall"
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command $block | Out-Host
+  Assert-Code $LASTEXITCODE 0 'uninstall via script block'
   foreach ($path in @($installDir, $oldDir, $cmdPath, $shortcut)) {
     if (Test-Path -LiteralPath $path) { Fail "still there after uninstall: $path" }
   }

@@ -152,7 +152,8 @@ jobs:
 
   # Installs the freshly packaged app with scripts/bootstrap.{sh,ps1} (RFW_ARCHIVE) into an
   # isolated temp profile, checks the installed command, update, refusal of unmarked folders
-  # and uninstall. The download path is covered on macOS/Linux with a fake GitHub.
+  # and uninstall. The download path is covered on macOS/Linux with a fake GitHub. On Windows
+  # the documented one-liners (irm | iex, script block with -Uninstall) run from the local file.
   bootstrap:
     name: bootstrap (${{ matrix.os }})
     strategy:
