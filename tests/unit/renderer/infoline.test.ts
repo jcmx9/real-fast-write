@@ -69,3 +69,49 @@ describe('InfoLine', () => {
     expect(el.querySelector('b')).toBeNull()
   })
 })
+
+describe('InfoLine focus and lifecycle', () => {
+  it('gives every button type=button and tabIndex -1', () => {
+    const el = document.createElement('footer')
+    const line = new InfoLine(el, actions())
+    line.render([{ name: 'A.md', dirty: false }], 0, '', 1)
+    const buttons = el.querySelectorAll('button')
+    expect(buttons.length).toBeGreaterThan(0)
+    for (const b of buttons) {
+      expect(b.type).toBe('button')
+      expect(b.tabIndex).toBe(-1)
+    }
+  })
+  it('cancels mousedown on the primary button so the editor keeps focus', () => {
+    const el = document.createElement('footer')
+    new InfoLine(el, actions()).render([{ name: 'A.md', dirty: false }], 0, '', 1)
+    const ev = new MouseEvent('mousedown', { button: 0, bubbles: true, cancelable: true })
+    q(el, 'il-edit').dispatchEvent(ev)
+    expect(ev.defaultPrevented).toBe(true)
+  })
+  it('does not cancel mousedown on non-primary buttons', () => {
+    const el = document.createElement('footer')
+    new InfoLine(el, actions()).render([{ name: 'A.md', dirty: false }], 0, '', 1)
+    const ev = new MouseEvent('mousedown', { button: 2, bubbles: true, cancelable: true })
+    q(el, 'il-zoom-in').dispatchEvent(ev)
+    expect(ev.defaultPrevented).toBe(false)
+  })
+  it('ticks once per 15 s even when start() is called twice', () => {
+    const now = vi.fn(() => new Date(2026, 9, 15, 14, 30))
+    const el = document.createElement('footer')
+    const line = new InfoLine(el, actions(), now)
+    line.start()
+    line.start()
+    const afterStart = now.mock.calls.length
+    vi.advanceTimersByTime(15_000)
+    expect(now.mock.calls.length - afterStart).toBe(1)
+    line.stop()
+  })
+  it('stop() before start() and a double stop() do not throw', () => {
+    const line = new InfoLine(document.createElement('footer'), actions())
+    expect(() => line.stop()).not.toThrow()
+    line.start()
+    line.stop()
+    expect(() => line.stop()).not.toThrow()
+  })
+})

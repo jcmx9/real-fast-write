@@ -29,6 +29,11 @@ function button(
   b.dataset.testid = testid
   b.textContent = text
   b.title = title
+  // tabIndex -1 does not stop a mouse click from focusing the button in Chromium;
+  // cancelling mousedown keeps focus in the editor while click still fires.
+  b.addEventListener('mousedown', (e) => {
+    if (e.button === 0) e.preventDefault()
+  })
   b.addEventListener('click', onClick)
   return b
 }
