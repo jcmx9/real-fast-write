@@ -105,12 +105,18 @@ function cursorInCollapsedHeader(state: EditorState): boolean {
 /** Undo/redo bypass the clamp filter; this moves a cursor that landed in the collapsed header. */
 const keepCursorOut = ViewPlugin.fromClass(
   class {
+    private destroyed = false
     update(u: { view: EditorView; state: EditorState }): void {
       if (!cursorInCollapsedHeader(u.state)) return
       const view = u.view
       queueMicrotask(() => {
+        // The view (or this plugin) may be gone by now: never dispatch to a destroyed view.
+        if (this.destroyed) return
         if (cursorInCollapsedHeader(view.state)) view.dispatch(moveOutOfHeader(view.state))
       })
+    }
+    destroy(): void {
+      this.destroyed = true
     }
   },
 )

@@ -271,6 +271,30 @@ describe('hardening', () => {
     v.destroy()
   })
 
+  it('the deferred move-out does not dispatch to a view destroyed in the meantime', async () => {
+    const v = pv(`${HEAD}\nBody`, 'edit')
+    v.dispatch({ effects: viewCompartment.reconfigure(viewExtensions('code')) })
+    v.dispatch({ changes: { from: 4, insert: 'x' }, selection: { anchor: 5 }, userEvent: 'input' })
+    v.dispatch({
+      effects: [
+        viewCompartment.reconfigure(viewExtensions('preview')),
+        modeCompartment.reconfigure(modeExtensions('present')),
+      ],
+    })
+    v.dispatch(moveOutOfHeader(v.state))
+    undo(v)
+    const dispatched: unknown[] = []
+    const original = v.dispatch.bind(v)
+    v.dispatch = ((...args: Parameters<EditorView['dispatch']>) => {
+      dispatched.push(args)
+      original(...args)
+    }) as EditorView['dispatch']
+    v.destroy()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(dispatched).toEqual([])
+  })
+
   it('leaving Present with the toggle on and no title fields shows the marker', () => {
     const doc = '---\ntoc: false\n---\n\n# Body'
     const text = (s: EditorState) => {
