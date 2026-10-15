@@ -17,7 +17,14 @@ import { modeCompartment, modeExtensions } from './editor/mode'
 import { jumpToEntry, OutlineSync, toggleEntryFold } from './editor/outline-actions'
 import { insertPageBreak } from './editor/pagebreak'
 import { foldAllSections } from './editor/sections'
-import { createState, serializeDoc, viewCompartment, viewExtensions } from './editor/setup'
+import {
+  createState,
+  freezeSpec,
+  isFrozen,
+  serializeDoc,
+  viewCompartment,
+  viewExtensions,
+} from './editor/setup'
 import { snippetRegistry } from './editor/snippets'
 import { type Tab, TabStore } from './tabs/tab-store'
 import { editTarget } from './ui/edit-target'
@@ -28,6 +35,7 @@ import { askText } from './ui/prompt'
 import { type SaveState, StatusLine, saveText } from './ui/statusline'
 import { TabBar } from './ui/tabbar'
 import { editorSizes, handleZoomKey, zoomIn, zoomOut } from './ui/zoom'
+import { closeWindow } from './util/close-guard'
 import { fileName } from './util/path'
 import { SerialQueue } from './util/serial'
 
@@ -91,6 +99,8 @@ export class App {
   private readonly savedHashes = new Map<number, string>()
   private readonly saving = new Map<number, Promise<boolean>>()
   private sessionTimer: ReturnType<typeof setTimeout> | null = null
+  /** The running window close; input into every tab is frozen while it is set. */
+  private closing: Promise<boolean> | null = null
 
   constructor(private readonly root: AppRoot) {
     this.editor = new EditorView({
@@ -180,6 +190,8 @@ export class App {
   // ── commands ────────────────────────────────────────────────────────────
 
   private async command(cmd: MenuCommand): Promise<void> {
+    // While the window closes nothing may change a document, a path or the tab list.
+    if (this.closing) return
     if (
       this.mode === 'present' &&
       (cmd === 'export' || cmd === 'toggle-view' || cmd === 'toggle-header')
@@ -317,6 +329,7 @@ export class App {
   }
 
   private async newNote(): Promise<void> {
+    if (this.closing) return
     const path = await this.rfw.newNotePath()
     this.store.add({
       path,
@@ -474,6 +487,8 @@ export class App {
   private async closeTab(id: number, discard = false): Promise<void> {
     const tab = this.store.get(id)
     if (!tab) return
+    // A banner's „Tab schließen“ (discard) is the user's explicit choice and stays allowed.
+    if (this.closing && !discard) return
     if (!discard) {
       let saved = true
       for (let i = 0; i < MAX_SAVE_ROUNDS && this.unsaved(tab); i++) {
@@ -508,7 +523,8 @@ export class App {
     const tab = this.store.active
     if (!tab) return
     const name = await askText('Umbenennen', 'Neuer Dateiname', fileName(tab.path))
-    if (!name) return
+    // A dialog answered after the window started closing must not move the file under it.
+    if (!name || this.closing) return
     if (!(await this.saveTab(tab, true))) {
       this.notices.panel(
         'Umbenennen nicht möglich',
@@ -621,22 +637,49 @@ export class App {
     return ok
   }
 
-  private async beforeClose(): Promise<boolean> {
-    let saved = await this.autosave.flush()
-    // Typing during the save leaves the tab dirty again: save again (bounded).
-    for (let i = 0; i < MAX_SAVE_ROUNDS && this.store.all.some((t) => this.unsaved(t)); i++) {
-      saved = await this.saveAll()
-      if (!saved) break
+  /**
+   * Input is frozen first, so saving converges: every keystroke is on disk or the user agreed
+   * to discard it. A held tab cannot be saved and always reaches the prompt. A second close
+   * request while one runs gets the same answer.
+   */
+  private beforeClose(): Promise<boolean> {
+    if (this.closing) return this.closing
+    const run = closeWindow({
+      freeze: () => this.freezeInput(true),
+      unfreeze: () => this.freezeInput(false),
+      flush: () => this.autosave.flush(),
+      saveAll: () => this.saveAll(),
+      pending: () => this.store.all.filter((t) => this.unsaved(t)).map((t) => fileName(t.path)),
+      persist: () => this.persistSession(),
+      confirmDiscard: (names) => this.rfw.confirmDiscard(names),
+    })
+    this.closing = run
+    // The window stays open after a cancel or an error: accept input and closes again.
+    run.then(
+      (ok) => {
+        if (!ok) this.closing = null
+      },
+      () => {
+        this.closing = null
+      },
+    )
+    return run
+  }
+
+  /** Freezes or thaws input in every tab: the shown view and the stored states. */
+  private freezeInput(frozen: boolean): void {
+    if (frozen) closeCompletion(this.editor)
+    const spec = freezeSpec(frozen)
+    for (const tab of this.store.all) {
+      if (tab.id === this.shownId) this.editor.dispatch(spec)
+      else this.store.updateState(tab.id, tab.state.update(spec).state)
     }
-    try {
-      await this.persistSession()
-    } catch (e) {
-      // Closing must not depend on the session write.
-      console.error('persistSession failed', e)
-    }
-    if (saved) return true
-    const names = this.store.all.filter((t) => this.unsaved(t)).map((t) => fileName(t.path))
-    return this.rfw.confirmDiscard(names)
+    if (!frozen && this.shownId !== null) this.editor.focus()
+  }
+
+  /** A state shown while closing (new tab, reload) is frozen like the others. */
+  private closingState(state: EditorState): EditorState {
+    return this.closing && !isFrozen(state) ? state.update(freezeSpec(true)).state : state
   }
 
   // ── external changes ────────────────────────────────────────────────────
@@ -757,12 +800,8 @@ export class App {
   }
 
   private reload(tab: Tab, note: NoteFile): void {
-    const state = createState(
-      note.text,
-      note.eol,
-      this.effectiveView(),
-      tab.headerHidden,
-      this.mode,
+    const state = this.closingState(
+      createState(note.text, note.eol, this.effectiveView(), tab.headerHidden, this.mode),
     )
     tab.bom = note.bom
     tab.eol = note.eol
@@ -787,7 +826,9 @@ export class App {
       // Close an open snippet list in the tab being left (routed to shownId), so it does not
       // reappear there later and a stray Enter inserts a snippet typed long ago.
       if (this.shownId !== null) closeCompletion(this.editor)
-      this.editor.setState(tab.state)
+      const state = this.closingState(tab.state)
+      if (state !== tab.state) this.store.updateState(tab.id, state)
+      this.editor.setState(state)
       this.editor.focus()
       this.outline.invalidate()
     }

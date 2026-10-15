@@ -175,7 +175,8 @@ export class AppContext {
       return
     }
     this.closeApproved = true
-    this.window?.close()
+    // A repeated close request is answered twice; the second may find the window gone.
+    if (this.window && !this.window.isDestroyed()) this.window.close()
     if (this.quitting) app.quit()
   }
 

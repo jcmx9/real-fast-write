@@ -95,3 +95,48 @@ test('select all still reaches the editor when a button has focus', async () => 
   await waitForFile(file, (b) => b.toString('utf8') === 'X')
   await app.close()
 })
+
+test('closing while typing saves every keystroke typed before the freeze', async () => {
+  const dirs = await makeDirs()
+  const file = join(dirs.notes, 'schnell.md')
+  await writeFile(file, 'Start')
+  const { app, page } = await launch({ dirs, args: [file] })
+  // The renderer reports the editor text when input freezes and when the page unloads; the
+  // last report is the editor content right before the window disappeared.
+  const reports: string[] = []
+  page.on('console', (m) => {
+    const t = m.text()
+    if (t.startsWith('RFW-TEXT:')) reports.push(t.slice('RFW-TEXT:'.length))
+  })
+  await page.evaluate(() => {
+    const content = document.querySelector('.cm-content') as HTMLElement
+    const text = () =>
+      [...content.querySelectorAll('.cm-line')].map((l) => l.textContent ?? '').join('\n')
+    new MutationObserver(() => {
+      if (content.getAttribute('contenteditable') === 'false') console.log(`RFW-TEXT:${text()}`)
+    }).observe(content, { attributes: true, attributeFilter: ['contenteditable'] })
+    window.addEventListener('beforeunload', () => console.log(`RFW-TEXT:${text()}`))
+  })
+  await typeInEditor(page, ' ')
+  const closed = page.waitForEvent('close')
+  const typing = (async () => {
+    for (let i = 0; ; i++) {
+      try {
+        await page.keyboard.type(`w${i}abcdefgh `)
+      } catch {
+        return
+      }
+    }
+  })()
+  await new Promise((r) => setTimeout(r, 400))
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]?.close()
+  })
+  await closed
+  await typing
+  const last = reports.at(-1)
+  expect(last, 'renderer reported its text before closing').toBeDefined()
+  expect(last?.length).toBeGreaterThan('Start w0'.length)
+  expect(await readFile(file, 'utf8')).toBe(last)
+  await app.close().catch(() => {})
+})

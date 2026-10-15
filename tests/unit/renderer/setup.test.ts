@@ -7,6 +7,8 @@ import { presentMode } from '../../../src/renderer/editor/mode'
 import {
   createState,
   foldBindings,
+  freezeSpec,
+  isFrozen,
   serializeDoc,
   viewCompartment,
   viewExtensions,
@@ -91,5 +93,33 @@ describe('createState mode', () => {
   })
   it('Edit keeps the old default', () => {
     expect(createState('---\na: 1\n---\nx', '\n', 'preview').selection.main.head).toBe(0)
+  })
+})
+
+describe('freezeSpec (closing)', () => {
+  it('a frozen state is read-only, not editable and drops every document change', () => {
+    const s = createState('abc', '\n', 'preview').update(freezeSpec(true)).state
+    expect(isFrozen(s)).toBe(true)
+    expect(s.readOnly).toBe(true)
+    expect(s.facet(EditorView.editable)).toBe(false)
+    // Programmatic inserts (snippet completion, checkbox toggle) are dropped too.
+    const after = s.update({ changes: { from: 3, insert: 'x' } }).state
+    expect(after.doc.toString()).toBe('abc')
+  })
+
+  it('unfreezing restores input', () => {
+    const s = createState('abc', '\n', 'code')
+      .update(freezeSpec(true))
+      .state.update(freezeSpec(false)).state
+    expect(isFrozen(s)).toBe(false)
+    expect(s.readOnly).toBe(false)
+    expect(s.facet(EditorView.editable)).toBe(true)
+    expect(s.update({ changes: { from: 3, insert: 'x' } }).state.doc.toString()).toBe('abcx')
+  })
+
+  it('a new state is not frozen', () => {
+    const s = createState('abc', '\n', 'code')
+    expect(isFrozen(s)).toBe(false)
+    expect(s.readOnly).toBe(false)
   })
 })
