@@ -16,6 +16,7 @@ const app = new App({
   editor: byId('editor'),
   empty: byId('empty'),
   status: byId('status'),
+  infoline: byId('infoline'),
   notices: byId('notices'),
 })
 void app.start()

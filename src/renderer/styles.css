@@ -20,8 +20,8 @@ body {
   display: none !important;
 }
 #app {
-  display: grid;
-  grid-template-rows: auto 1fr auto;
+  display: flex;
+  flex-direction: column;
   height: 100vh;
 }
 #tabbar {
@@ -58,7 +58,40 @@ body {
 }
 #workspace {
   position: relative;
+  flex: 1;
   min-height: 0;
+}
+#infoline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 14px;
+  font-size: 12px;
+  color: var(--chrome-muted);
+  background: var(--rfd-bg, #fff);
+}
+#infoline button {
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+#infoline button:hover {
+  background: var(--chrome-bg);
+}
+#infoline .rf-il-tab.active {
+  color: var(--chrome-fg);
+  font-weight: 600;
+}
+#infoline .rf-il-tab.dirty::after {
+  content: " •";
+  color: var(--accent);
+}
+#infoline .rf-il-spacer {
+  flex: 1;
 }
 #editor,
 #editor .cm-editor {

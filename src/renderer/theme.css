@@ -416,3 +416,12 @@
   font-size: 0.85em;
   color: var(--rfd-faint);
 }
+
+/* Present: larger text in a calm, centred column; no gutters */
+.rf-present .cm-content {
+  max-width: 70ch;
+  padding-top: 3em;
+}
+.rf-present .cm-gutters {
+  display: none;
+}
