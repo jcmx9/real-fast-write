@@ -1,11 +1,12 @@
 import { syntaxTree } from '@codemirror/language'
-import type { EditorState, Range } from '@codemirror/state'
+import type { EditorState, Range, TransactionSpec } from '@codemirror/state'
 import {
   Decoration,
   type DecorationSet,
   type EditorView,
   ViewPlugin,
   type ViewUpdate,
+  WidgetType,
 } from '@codemirror/view'
 import type { SyntaxNode, SyntaxNodeRef } from '@lezer/common'
 
@@ -134,9 +135,179 @@ export function visitInline(cx: PreviewCx, ref: SyntaxNodeRef): boolean | undefi
   return
 }
 
+const ALERT_TITLES: Record<string, string> = {
+  note: 'Info',
+  tip: 'Tipp',
+  important: 'Wichtig',
+  warning: 'Hinweis',
+  caution: 'Achtung',
+}
+const ALERT_RE = /^\s*>\s*\[!(note|tip|important|warning|caution)\]\s*$/i
+
+class BulletWidget extends WidgetType {
+  override eq(): boolean {
+    return true
+  }
+  toDOM(): HTMLElement {
+    const s = document.createElement('span')
+    s.className = 'rf-bullet'
+    s.setAttribute('aria-hidden', 'true')
+    return s
+  }
+}
+
+class TaskWidget extends WidgetType {
+  constructor(readonly checked: boolean) {
+    super()
+  }
+  override eq(other: TaskWidget): boolean {
+    return other.checked === this.checked
+  }
+  toDOM(view: EditorView): HTMLElement {
+    const box = document.createElement('input')
+    box.type = 'checkbox'
+    box.className = 'rf-task'
+    box.checked = this.checked
+    box.setAttribute('aria-label', this.checked ? 'Erledigt' : 'Offen')
+    box.addEventListener('mousedown', (e) => {
+      e.preventDefault()
+      // Position looked up at click time, so a reused widget never edits a stale offset.
+      const spec = toggleTaskAt(view.state, view.posAtDOM(box))
+      if (spec) view.dispatch(spec)
+    })
+    return box
+  }
+}
+
+class AlertTitleWidget extends WidgetType {
+  constructor(readonly title: string) {
+    super()
+  }
+  override eq(other: AlertTitleWidget): boolean {
+    return other.title === this.title
+  }
+  toDOM(): HTMLElement {
+    const s = document.createElement('span')
+    s.className = 'rf-alert-title'
+    s.textContent = this.title
+    return s
+  }
+}
+
+/** Toggles `[ ]` ↔ `[x]` at `pos` (the `[`): exactly one character changes. */
+export function toggleTaskAt(state: EditorState, pos: number): TransactionSpec | null {
+  const text = state.doc.sliceString(pos, pos + 3)
+  if (!/^\[[ xX]\]$/.test(text)) return null
+  return {
+    changes: { from: pos + 1, to: pos + 2, insert: text[1] === ' ' ? 'x' : ' ' },
+    userEvent: 'input.toggle-task',
+  }
+}
+
+function hideQuoteMark(cx: PreviewCx, m: { from: number; to: number }): void {
+  const line = cx.state.doc.lineAt(m.from)
+  if (cx.replacedLines.has(line.from)) return
+  const space = cx.state.doc.sliceString(m.to, m.to + 1) === ' ' ? 1 : 0
+  cx.hideOrFaint(m.from, m.to + space, cx.onLine(m.from))
+}
+
+export function visitBlock(cx: PreviewCx, ref: SyntaxNodeRef): boolean | undefined {
+  const { state, out } = cx
+  const doc = state.doc
+  switch (ref.name) {
+    case 'ListMark': {
+      const item = ref.node.parent
+      if (item?.parent?.name !== 'BulletList') return
+      if (item.getChild('Task')) {
+        const space = doc.sliceString(ref.to, ref.to + 1) === ' ' ? 1 : 0
+        out.push(hide.range(ref.from, ref.to + space))
+      } else if (cx.onLine(ref.from)) {
+        out.push(faint.range(ref.from, ref.to))
+      } else {
+        out.push(
+          Decoration.replace({ widget: new BulletWidget(), rf: 'bullet' }).range(ref.from, ref.to),
+        )
+      }
+      return
+    }
+    case 'TaskMarker': {
+      const checked = /x/i.test(doc.sliceString(ref.from, ref.to))
+      out.push(
+        Decoration.replace({ widget: new TaskWidget(checked), rf: 'task' }).range(ref.from, ref.to),
+      )
+      return
+    }
+    case 'Blockquote': {
+      const first = doc.lineAt(ref.from)
+      const alert = ALERT_RE.exec(first.text)
+      if (alert?.[1]) {
+        const type = alert[1].toLowerCase()
+        cx.lines(ref.from, ref.to, lineDeco(`rf-alert rf-alert-${type}`))
+        if (!cx.onLine(first.from)) {
+          cx.replacedLines.add(first.from)
+          out.push(
+            Decoration.replace({
+              widget: new AlertTitleWidget(ALERT_TITLES[type] ?? type),
+              rf: 'alert-title',
+            }).range(first.from, first.to),
+          )
+        }
+      } else {
+        cx.lines(ref.from, ref.to, lineDeco('rf-quote'))
+      }
+      return
+    }
+    case 'QuoteMark':
+      hideQuoteMark(cx, ref)
+      return
+    case 'FencedCode': {
+      const firstLine = doc.lineAt(ref.from)
+      const lastLine = doc.lineAt(ref.to)
+      const closed = lastLine.number > firstLine.number && /^\s*(```|~~~)/.test(lastLine.text)
+      for (let n = firstLine.number; n <= lastLine.number; n++) {
+        const l = doc.line(n)
+        const fence = n === firstLine.number || (closed && n === lastLine.number)
+        out.push(lineDeco(fence ? 'rf-codefence' : 'rf-codeblock').range(l.from))
+      }
+      return false
+    }
+    case 'CodeBlock':
+      cx.lines(ref.from, ref.to, lineDeco('rf-codeblock'))
+      return false
+    case 'Table': {
+      const firstLine = doc.lineAt(ref.from).number
+      const lastLine = doc.lineAt(Math.max(ref.from, ref.to - 1)).number
+      // Away from the cursor, tableField (Task 6) shows the PDF-like widget instead.
+      if (!cx.touches(doc.line(firstLine).from, doc.line(lastLine).to)) return false
+      for (let n = firstLine; n <= lastLine; n++) {
+        const idx = n - firstLine
+        const cls =
+          idx === 0
+            ? 'rf-table-head'
+            : idx === 1
+              ? 'rf-table-delim'
+              : (idx - 2) % 2 === 1
+                ? 'rf-table-row rf-table-stripe'
+                : 'rf-table-row'
+        out.push(lineDeco(cls).range(doc.line(n).from))
+      }
+      return
+    }
+    case 'TableDelimiter':
+      out.push(faint.range(ref.from, ref.to))
+      return
+    case 'HorizontalRule':
+      out.push(lineDeco('rf-hr').range(doc.lineAt(ref.from).from))
+      if (!cx.onLine(ref.from)) out.push(hide.range(ref.from, ref.to))
+      return
+  }
+  return
+}
+
 /** Node handlers; every handler sees every node. If any returns false, the node's children are skipped. */
 export const handlers: Array<(cx: PreviewCx, ref: SyntaxNodeRef) => boolean | undefined> = [
   visitInline,
+  visitBlock,
 ]
 
 export function buildPreview(
