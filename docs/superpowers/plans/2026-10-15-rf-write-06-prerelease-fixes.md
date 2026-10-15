@@ -109,3 +109,18 @@ CHANGELOG `Fixed`: "A note opened under two path spellings (symlink, case, 8.3 n
 - Manual on a German Windows keyboard: AltGr `[`/`]`, Ctrl+`+`/numpad zoom (one step per press), Ctrl+Shift+P held, menu bar after Present from user fullscreen — done by the user after the Distribution plan provides an installer.
 - rf-document on Windows not finding typst right after winget install — upstream in real-fast-document.
 - App name "Electron" in dev mode and the header-default preference — Distribution plan (packaging + settings dialog).
+
+---
+
+### Task 7: App name "rf-write" in development on macOS (user request 2026-10-15)
+
+**Files:** Create `scripts/dev-app-name.mjs`; modify `package.json` (`"postinstall": "node scripts/dev-app-name.mjs"`), `tests/unit/scripts/dev-app-name.test.ts`, README de/en Development section (one line), CHANGELOG `Fixed`.
+
+Behaviour:
+- On macOS only (`process.platform === 'darwin'`), set `CFBundleName` and `CFBundleDisplayName` in `node_modules/electron/dist/Electron.app/Contents/Info.plist` to the `productName` from `package.json` (`rf-write`). Elsewhere: exit 0 without doing anything.
+- Use `/usr/bin/plutil -replace CFBundleName -string <name> <plist>` (and the same for `CFBundleDisplayName`) via `execFileSync` (no shell). Idempotent. Missing Electron (e.g. `--ignore-scripts`, optional deps) → print a one-line notice and exit 0; never fail `npm install`/`npm ci`.
+- Then `touch` the `.app` bundle directory so LaunchServices refreshes the cached name.
+- Do not rename the bundle or the binary (electron's `path.txt` must stay valid; `require('electron')` returns the binary path).
+- Test: the pure function that computes the plutil argument lists from `package.json` and the plist path, plus a darwin-only integration test on a temp copy of an Info.plist (skipped on other OSes). Manual check: `npm run dev` shows "rf-write" in the menu bar, Dock and Cmd-Tab (after quitting any running dev instance).
+
+Commit: `fix(dev): show rf-write instead of Electron as the app name on macOS`
