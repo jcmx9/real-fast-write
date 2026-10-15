@@ -7,8 +7,15 @@ import {
   type Transaction,
   type TransactionSpec,
 } from '@codemirror/state'
-import { Decoration, type DecorationSet, EditorView, WidgetType } from '@codemirror/view'
+import {
+  Decoration,
+  type DecorationSet,
+  EditorView,
+  ViewPlugin,
+  WidgetType,
+} from '@codemirror/view'
 import { frontmatterRange } from './frontmatter'
+import { presentMode } from './mode'
 import { renderTitleBlock, type TitleBlock, titleBlockData } from './titleblock'
 
 export const setHeaderHidden = StateEffect.define<boolean>()
@@ -22,28 +29,35 @@ export const headerHidden = StateField.define<boolean>({
 })
 
 class TitleBlockWidget extends WidgetType {
-  constructor(readonly data: TitleBlock | null) {
+  constructor(
+    readonly data: TitleBlock | null,
+    readonly present: boolean,
+  ) {
     super()
   }
   override eq(other: TitleBlockWidget): boolean {
-    return JSON.stringify(other.data) === JSON.stringify(this.data)
+    return (
+      other.present === this.present && JSON.stringify(other.data) === JSON.stringify(this.data)
+    )
   }
   override toDOM(): HTMLElement {
-    return renderTitleBlock(this.data)
+    return renderTitleBlock(this.data, document, this.present ? 'none' : 'marker')
   }
 }
 
 function build(state: EditorState): DecorationSet {
-  if (!state.field(headerHidden, false)) return Decoration.none
+  const present = state.facet(presentMode)
+  if (!present && !state.field(headerHidden, false)) return Decoration.none
   const range = frontmatterRange(state.doc)
-  if (!range) return Decoration.none
-  // A selection on the header (e.g. one just retyped while hidden) keeps it visible.
-  if (state.selection.ranges.some((r) => r.from <= range.to && r.to >= range.from)) {
+  // A header-only note stays open: there is nothing to type into otherwise.
+  if (!range || range.to >= state.doc.length) return Decoration.none
+  // Outside Present, a selection on the header (e.g. just retyped) keeps it visible.
+  if (!present && state.selection.ranges.some((r) => r.from <= range.to && r.to >= range.from)) {
     return Decoration.none
   }
   return Decoration.set([
     Decoration.replace({
-      widget: new TitleBlockWidget(titleBlockData(state.doc)),
+      widget: new TitleBlockWidget(titleBlockData(state.doc), present),
       block: true,
       rf: 'header-fold',
     }).range(range.from, range.to),
@@ -83,30 +97,60 @@ function clampSelection(tr: Transaction): Transaction | readonly (Transaction | 
   return [tr, { selection, sequential: true }]
 }
 
+function cursorInCollapsedHeader(state: EditorState): boolean {
+  const range = collapsedRange(state)
+  return !!range && state.selection.ranges.some((r) => r.anchor <= range.to || r.head <= range.to)
+}
+
+/** Undo/redo bypass the clamp filter; this moves a cursor that landed in the collapsed header. */
+const keepCursorOut = ViewPlugin.fromClass(
+  class {
+    private destroyed = false
+    update(u: { view: EditorView; state: EditorState }): void {
+      if (!cursorInCollapsedHeader(u.state)) return
+      const view = u.view
+      queueMicrotask(() => {
+        // The view (or this plugin) may be gone by now: never dispatch to a destroyed view.
+        if (this.destroyed) return
+        if (cursorInCollapsedHeader(view.state)) view.dispatch(moveOutOfHeader(view.state))
+      })
+    }
+    destroy(): void {
+      this.destroyed = true
+    }
+  },
+)
+
 /** Preview-only: the collapsed header, atomic and read-only so it is never edited unseen. */
 export const headerFold: StateField<DecorationSet> = StateField.define<DecorationSet>({
   create: build,
   update(deco, tr) {
     const flipped = tr.startState.field(headerHidden, false) !== tr.state.field(headerHidden, false)
-    return tr.docChanged || tr.selection || flipped ? build(tr.state) : deco
+    const modeFlipped = tr.startState.facet(presentMode) !== tr.state.facet(presentMode)
+    return tr.docChanged || tr.selection || flipped || modeFlipped ? build(tr.state) : deco
   },
   provide: (f) => [
     EditorView.decorations.from(f),
     EditorView.atomicRanges.of((view) => view.state.field(f)),
     EditorState.changeFilter.of(protectHeader),
     EditorState.transactionFilter.of(clampSelection),
+    keepCursorOut,
   ],
 })
 
-export function headerToggleSpec(state: EditorState, hide: boolean): TransactionSpec {
-  const effects = setHeaderHidden.of(hide)
-  const range = hide ? frontmatterRange(state.doc) : null
-  if (!range) return { effects }
+/** Selection-only spec: a cursor inside the front matter moves to the line after it. */
+export function moveOutOfHeader(state: EditorState): TransactionSpec {
+  const range = frontmatterRange(state.doc)
+  if (!range) return {}
   const inside = state.selection.ranges.some((r) => r.from <= range.to && r.to >= range.from)
-  if (!inside) return { effects }
+  if (!inside) return {}
   return {
-    effects,
     selection: EditorSelection.cursor(Math.min(range.to + 1, state.doc.length)),
     scrollIntoView: true,
   }
+}
+
+export function headerToggleSpec(state: EditorState, hide: boolean): TransactionSpec {
+  const effects = setHeaderHidden.of(hide)
+  return hide ? { ...moveOutOfHeader(state), effects } : { effects }
 }

@@ -63,11 +63,19 @@ export function titleBlockData(doc: Text): TitleBlock | null {
   return { client, title, subtitle, meta: author ? [date, author].filter(Boolean).join(' · ') : '' }
 }
 
-export function renderTitleBlock(tb: TitleBlock | null, doc: Document = document): HTMLElement {
+export function renderTitleBlock(
+  tb: TitleBlock | null,
+  doc: Document = document,
+  empty: 'marker' | 'none' = 'marker',
+): HTMLElement {
   const el = doc.createElement('div')
   el.className = 'rf-titleblock'
-  el.title = 'YAML-Header ausgeblendet'
+  if (empty !== 'none' || tb) el.title = 'YAML-Header ausgeblendet'
   if (!tb) {
+    if (empty === 'none') {
+      el.classList.add('rf-titleblock-none')
+      return el
+    }
     el.classList.add('rf-titleblock-empty')
     el.textContent = '⋯ YAML-Header'
     return el

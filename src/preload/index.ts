@@ -23,6 +23,10 @@ const api: RfwApi = {
   onExternalChange: (cb) => {
     ipcRenderer.on(Ch.externalChange, (_e, note: NoteFile) => cb(note))
   },
+  setFullScreen: (on) => ipcRenderer.invoke(Ch.setFullScreen, on),
+  onFullScreenLeft: (cb) => {
+    ipcRenderer.on(Ch.fullScreenLeft, () => cb())
+  },
   onBeforeClose: (cb) => {
     ipcRenderer.on(Ch.beforeClose, async () => {
       let ok = false

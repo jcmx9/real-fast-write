@@ -69,12 +69,16 @@ export type MenuCommand =
   | 'undo'
   | 'redo'
   | 'select-all'
+  | 'toggle-present'
   | 'toggle-view'
   | 'toggle-header'
   | 'fold'
   | 'unfold'
   | 'fold-all'
   | 'unfold-all'
+  | 'zoom-in'
+  | 'zoom-out'
+  | 'zoom-reset'
 
 export interface RfwApi {
   startup(): Promise<StartupState>
@@ -93,4 +97,7 @@ export interface RfwApi {
   onExternalChange(cb: (note: NoteFile) => void): void
   /** cb resolves true when the window may close. */
   onBeforeClose(cb: () => Promise<boolean>): void
+  /** Resolves to whether the user (not the app) had the window fullscreen before the change. */
+  setFullScreen(on: boolean): Promise<boolean>
+  onFullScreenLeft(cb: () => void): void
 }

@@ -3,6 +3,7 @@ import { foldedRanges } from '@codemirror/language'
 import { EditorView } from '@codemirror/view'
 import { describe, expect, it } from 'vitest'
 import { headerHidden } from '../../../src/renderer/editor/header'
+import { presentMode } from '../../../src/renderer/editor/mode'
 import {
   createState,
   foldBindings,
@@ -78,5 +79,17 @@ describe('foldBindings', () => {
     expect(run('Alt-Shift-0')).toBe(true)
     expect(foldedRanges(view.state).size).toBe(0)
     view.destroy()
+  })
+})
+
+describe('createState mode', () => {
+  it('Present starts with the cursor after the header and the facet set', () => {
+    const doc = '---\na: 1\n---\nx'
+    const s = createState(doc, '\n', 'preview', false, 'present')
+    expect(s.facet(presentMode)).toBe(true)
+    expect(s.selection.main.head).toBe(13)
+  })
+  it('Edit keeps the old default', () => {
+    expect(createState('---\na: 1\n---\nx', '\n', 'preview').selection.main.head).toBe(0)
   })
 })

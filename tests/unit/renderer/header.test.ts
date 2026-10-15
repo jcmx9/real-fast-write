@@ -9,7 +9,13 @@ import {
 import { EditorState } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import { describe, expect, it } from 'vitest'
-import { headerFold, headerHidden, headerToggleSpec } from '../../../src/renderer/editor/header'
+import {
+  headerFold,
+  headerHidden,
+  headerToggleSpec,
+  moveOutOfHeader,
+} from '../../../src/renderer/editor/header'
+import { modeCompartment, modeExtensions } from '../../../src/renderer/editor/mode'
 import { createState, viewCompartment, viewExtensions } from '../../../src/renderer/editor/setup'
 
 const DOC = '---\ntitle: "Kickoff"\n---\n\n# Body'
@@ -166,5 +172,156 @@ describe('collapsed header in a real view', () => {
       selection: { anchor: 14 },
     }).state
     expect(collapsed(away)).toEqual(['header-fold@0-12'])
+  })
+})
+
+function makePresent(doc: string, cursor: number, hidden = false) {
+  return EditorState.create({
+    doc,
+    selection: { anchor: cursor },
+    extensions: [
+      headerHidden.init(() => hidden),
+      headerFold,
+      modeCompartment.of(modeExtensions('present')),
+    ],
+  })
+}
+
+describe('Present', () => {
+  it('collapses the header even when the per-tab toggle is off', () => {
+    expect(collapsed(makePresent(DOC, DOC.length))).toEqual([`header-fold@0-${END}`])
+  })
+  it('collapses even while the selection touches it, and clamps the selection out', () => {
+    const s = makePresent(DOC, DOC.length)
+    const next = s.update({ selection: { anchor: 2 } }).state
+    expect(collapsed(next)).toEqual([`header-fold@0-${END}`])
+    expect(next.selection.main.head).toBe(END + 1)
+  })
+  it('is read-only in Present', () => {
+    const s = makePresent(DOC, DOC.length)
+    const next = s.update({ changes: { from: 4, insert: 'x' } }).state
+    expect(next.doc.toString()).toBe(DOC)
+  })
+  it('leaving Present restores the per-tab toggle', () => {
+    const s = makePresent(DOC, DOC.length, false)
+    const edit = s.update({ effects: modeCompartment.reconfigure(modeExtensions('edit')) }).state
+    expect(collapsed(edit)).toEqual([])
+    const hidden = makePresent(DOC, DOC.length, true)
+    const edit2 = hidden.update({
+      effects: modeCompartment.reconfigure(modeExtensions('edit')),
+    }).state
+    expect(collapsed(edit2)).toEqual([`header-fold@0-${END}`])
+  })
+  it('a note without title fields shows nothing in Present', () => {
+    const doc = '---\ntoc: false\n---\n\n# Body'
+    const s = makePresent(doc, doc.length)
+    let dom: HTMLElement | null = null
+    s.field(headerFold).between(0, doc.length, (_f, _t, d) => {
+      dom = (d.spec.widget as { toDOM(): HTMLElement }).toDOM()
+    })
+    expect((dom as HTMLElement | null)?.classList.contains('rf-titleblock-none')).toBe(true)
+    expect((dom as HTMLElement | null)?.textContent).toBe('')
+  })
+})
+
+describe('moveOutOfHeader', () => {
+  it('moves a cursor inside the front matter after it, else does nothing', () => {
+    const inside = EditorState.create({ doc: DOC, selection: { anchor: 5 } })
+    expect(inside.update(moveOutOfHeader(inside)).state.selection.main.head).toBe(END + 1)
+    const outside = EditorState.create({ doc: DOC, selection: { anchor: DOC.length } })
+    expect(moveOutOfHeader(outside)).toEqual({})
+  })
+})
+
+describe('hardening', () => {
+  const HEAD = '---\ntitle: "Kickoff"\n---'
+  function pv(text: string, mode: 'edit' | 'present' = 'present') {
+    const parent = document.createElement('div')
+    document.body.append(parent)
+    return new EditorView({ state: createState(text, '\n', 'preview', false, mode), parent })
+  }
+
+  it('a header-only note stays editable in Present', async () => {
+    const v = pv('---\na: 1\n---')
+    expect(collapsed(v.state)).toEqual([])
+    v.dispatch({ changes: { from: v.state.doc.length, insert: '\nText' }, userEvent: 'input' })
+    expect(v.state.doc.toString()).toBe('---\na: 1\n---\nText')
+    expect(collapsed(v.state)).toEqual(['header-fold@0-12'])
+    await Promise.resolve()
+    expect(v.state.selection.main.head).toBeGreaterThanOrEqual(13)
+    v.destroy()
+  })
+
+  it('undo that lands in the collapsed header moves the cursor out', async () => {
+    const v = pv(`${HEAD}\nBody`, 'edit')
+    v.dispatch({ effects: viewCompartment.reconfigure(viewExtensions('code')) })
+    v.dispatch({ changes: { from: 4, insert: 'x' }, selection: { anchor: 5 }, userEvent: 'input' })
+    v.dispatch({
+      effects: [
+        viewCompartment.reconfigure(viewExtensions('preview')),
+        modeCompartment.reconfigure(modeExtensions('present')),
+      ],
+    })
+    v.dispatch(moveOutOfHeader(v.state))
+    undo(v)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(v.state.doc.toString()).toBe(`${HEAD}\nBody`)
+    expect(v.state.selection.main.head).toBeGreaterThanOrEqual(HEAD.length + 1)
+    v.destroy()
+  })
+
+  it('the deferred move-out does not dispatch to a view destroyed in the meantime', async () => {
+    const v = pv(`${HEAD}\nBody`, 'edit')
+    v.dispatch({ effects: viewCompartment.reconfigure(viewExtensions('code')) })
+    v.dispatch({ changes: { from: 4, insert: 'x' }, selection: { anchor: 5 }, userEvent: 'input' })
+    v.dispatch({
+      effects: [
+        viewCompartment.reconfigure(viewExtensions('preview')),
+        modeCompartment.reconfigure(modeExtensions('present')),
+      ],
+    })
+    v.dispatch(moveOutOfHeader(v.state))
+    undo(v)
+    const dispatched: unknown[] = []
+    const original = v.dispatch.bind(v)
+    v.dispatch = ((...args: Parameters<EditorView['dispatch']>) => {
+      dispatched.push(args)
+      original(...args)
+    }) as EditorView['dispatch']
+    v.destroy()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(dispatched).toEqual([])
+  })
+
+  it('leaving Present with the toggle on and no title fields shows the marker', () => {
+    const doc = '---\ntoc: false\n---\n\n# Body'
+    const text = (s: EditorState) => {
+      let out = ''
+      s.field(headerFold).between(0, doc.length, (_f, _t, d) => {
+        out = (d.spec.widget as { toDOM(): HTMLElement }).toDOM().textContent ?? ''
+      })
+      return out
+    }
+    const s = makePresent(doc, doc.length, true)
+    expect(text(s)).toBe('')
+    const edit = s.update({ effects: modeCompartment.reconfigure(modeExtensions('edit')) }).state
+    expect(text(edit)).toBe('⋯ YAML-Header')
+  })
+
+  it('Present keystrokes leave the header bytes unchanged', () => {
+    const body = `${HEAD}\nBody`
+    const v = pv(body)
+    v.dispatch({ selection: { anchor: HEAD.length + 1 } })
+    deleteCharBackward(v)
+    expect(v.state.doc.toString()).toBe(body)
+    cursorDocStart(v)
+    v.dispatch(v.state.replaceSelection('z'))
+    expect(v.state.doc.sliceString(0, HEAD.length)).toBe(HEAD)
+    selectAll(v)
+    deleteCharBackward(v)
+    expect(v.state.doc.sliceString(0, HEAD.length)).toBe(HEAD)
+    v.destroy()
   })
 })
