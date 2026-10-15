@@ -12,6 +12,7 @@ import { foldAllSections } from './editor/sections'
 import { createState, serializeDoc, viewCompartment, viewExtensions } from './editor/setup'
 import { snippetRegistry } from './editor/snippets'
 import { type Tab, TabStore } from './tabs/tab-store'
+import { editTarget } from './ui/edit-target'
 import { InfoLine } from './ui/infoline'
 import { Notices } from './ui/notices'
 import { askText } from './ui/prompt'
@@ -223,12 +224,13 @@ export class App {
     name: 'undo' | 'redo' | 'selectAll' | 'insertPageBreak',
     run: (v: EditorView) => unknown,
   ): void {
-    const el = document.activeElement
-    const textField =
-      el instanceof HTMLInputElement ||
-      el instanceof HTMLTextAreaElement ||
-      (el instanceof HTMLElement && el.isContentEditable && !this.editor.dom.contains(el))
-    if (textField) {
+    const target = editTarget(
+      document.activeElement,
+      this.editor.dom,
+      document.querySelector('dialog[open]') !== null,
+    )
+    if (target === 'blocked') return
+    if (target === 'field') {
       // A page break only makes sense in the document; other fields ignore the shortcut.
       if (name !== 'insertPageBreak') document.execCommand(name)
       return

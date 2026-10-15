@@ -5,6 +5,8 @@ import { frontmatterRange } from './frontmatter'
 /** rf-document's page break: an HTML comment on its own line. */
 export const PAGEBREAK = '<!-- pagebreak -->'
 
+const isBlank = (text: string): boolean => /^\s*$/.test(text)
+
 /** Whether the selection touches the YAML front matter (a break there would corrupt it). */
 function inFrontmatter(state: EditorState): boolean {
   const range = frontmatterRange(state.doc)
@@ -28,13 +30,13 @@ export const insertPageBreak: Command = (view: EditorView): boolean => {
   const prev = startLine.number > 1 ? state.doc.line(startLine.number - 1) : null
 
   // Break must start on its own line, preceded by a blank line.
-  const prefix = before ? nl + nl : !prev || prev.length === 0 ? '' : nl
+  const prefix = before ? nl + nl : !prev || isBlank(prev.text) ? '' : nl
 
   const tailEmpty = to === endLine.to
   const next = endLine.number < state.doc.lines ? state.doc.line(endLine.number + 1) : null
   let suffix: string
   if (!tailEmpty) suffix = nl + nl
-  else if (next) suffix = next.length === 0 ? '' : nl
+  else if (next) suffix = isBlank(next.text) ? '' : nl
   else suffix = before || from !== to ? nl + nl : nl
 
   const insert = prefix + PAGEBREAK + suffix

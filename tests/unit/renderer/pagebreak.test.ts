@@ -54,6 +54,15 @@ describe('insertPageBreak', () => {
     expect(v.state.selection.main.head).toBe(cursor)
   })
 
+  it.each([
+    ['A\n  \n|B', `A\n  \n${B}\n\nB`],
+    ['A|\n \t\nB', `A\n\n${B}\n \t\nB`],
+  ])('whitespace-only lines count as empty: %j', (marked, expected) => {
+    const v = make(marked)
+    insertPageBreak(v)
+    expect(doc(v)).toBe(expected)
+  })
+
   it('does not double blank lines around a break on an empty line', () => {
     const v = make('A\n\n|\nB')
     insertPageBreak(v)
