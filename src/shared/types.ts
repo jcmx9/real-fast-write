@@ -101,3 +101,9 @@ export interface RfwApi {
   setFullScreen(on: boolean): Promise<boolean>
   onFullScreenLeft(cb: () => void): void
 }
+
+export interface SnippetDef {
+  name: string
+  body: string
+  source: 'builtin' | 'user'
+}

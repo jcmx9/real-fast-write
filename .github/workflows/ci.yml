@@ -29,7 +29,16 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run typecheck
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: jcmx9/real-fast-document
+          path: .rfd
+          sparse-checkout: header.md
+          sparse-checkout-cone-mode: false
+
       - run: npm run test:coverage
+        env:
+          RFD_HEADER: ${{ github.workspace }}/.rfd/header.md
       - run: npm run build
 
       - name: Install rf-document (macOS / Linux)
