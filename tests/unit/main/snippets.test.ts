@@ -1,4 +1,6 @@
-import { mkdir, mkdtemp, stat, writeFile } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
+import { closeSync, constants, openSync } from 'node:fs'
+import { mkdir, mkdtemp, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -47,4 +49,33 @@ describe('loadUserSnippets', () => {
     const d = await dir({ [`${'A\u0308'}rger.tpl.md`]: 'x' })
     expect((await loadUserSnippets(d)).map((s) => s.name)).toEqual(['\u00C4rger'])
   })
+
+  it.skipIf(process.platform === 'win32')(
+    'never opens a FIFO (it would block a libuv thread); a symlink to a file is fine',
+    async () => {
+      const d = await dir({ 'real.tpl.md': 'R', 'ok.tpl.md': 'ok' })
+      const fifo = join(d, 'pipe.tpl.md')
+      execFileSync('mkfifo', [fifo])
+      await symlink(join(d, 'real.tpl.md'), join(d, 'link.tpl.md'))
+      await symlink(fifo, join(d, 'pipelink.tpl.md'))
+      try {
+        const result = await Promise.race([
+          loadUserSnippets(d),
+          new Promise<'blocked'>((r) => setTimeout(() => r('blocked'), 1500)),
+        ])
+        expect(result === 'blocked' ? result : result.map((s) => s.name)).toEqual([
+          'link',
+          'ok',
+          'real',
+        ])
+      } finally {
+        // Release a reader that may be blocked on the FIFO (only possible while one waits).
+        try {
+          closeSync(openSync(fifo, constants.O_WRONLY | constants.O_NONBLOCK))
+        } catch {
+          // ENXIO: nobody is waiting, which is the expected case.
+        }
+      }
+    },
+  )
 })

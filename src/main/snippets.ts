@@ -1,4 +1,5 @@
-import { open, readdir } from 'node:fs/promises'
+import { constants } from 'node:fs'
+import { open, readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { SNIPPET_EXT, SNIPPET_NAME_RE } from '../shared/snippets'
 import type { SnippetDef } from '../shared/types'
@@ -6,6 +7,8 @@ import type { SnippetDef } from '../shared/types'
 const MAX_BYTES = 64 * 1024
 const BOM = '﻿'
 const utf8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
+// O_NONBLOCK (POSIX only) keeps a FIFO swapped in after the stat check from blocking open().
+const OPEN_FLAGS = constants.O_RDONLY | (constants.O_NONBLOCK ?? 0)
 
 /** Reads the user's snippet templates; a missing folder yields an empty list. */
 export async function loadUserSnippets(dir: string): Promise<SnippetDef[]> {
@@ -25,7 +28,9 @@ export async function loadUserSnippets(dir: string): Promise<SnippetDef[]> {
     if (!SNIPPET_NAME_RE.test(name)) continue
     try {
       const p = join(dir, file)
-      const fh = await open(p, 'r')
+      // Only regular files (symlinks followed): opening a FIFO would block a libuv thread for good.
+      if (!(await stat(p)).isFile()) continue
+      const fh = await open(p, OPEN_FLAGS)
       let buf: Buffer
       try {
         if (!(await fh.stat()).isFile()) continue
