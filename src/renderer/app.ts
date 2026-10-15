@@ -695,7 +695,12 @@ export class App {
     return run
   }
 
-  /** Freezes or thaws input in every tab: the shown view and the stored states. */
+  /**
+   * Freezes or thaws input in every tab: the shown view and the stored states.
+   * IME: text an input method is still composing at the freeze is saved as CodeMirror already
+   * mirrored it into the state (possibly the unconverted pre-edit text); the later commit and
+   * any keystroke whose DOM change was not read yet are dropped. Both stay "up to the freeze".
+   */
   private freezeInput(frozen: boolean): void {
     if (frozen) closeCompletion(this.editor)
     const spec = freezeSpec(frozen)

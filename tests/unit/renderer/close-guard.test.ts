@@ -102,4 +102,15 @@ describe('closeWindow', () => {
     await expect(closeWindow(steps)).rejects.toThrow('boom')
     expect(t.frozen).toBe(false)
   })
+
+  it('a freeze that throws partway thaws the tabs it already froze', async () => {
+    const { t, steps } = fakeTab()
+    steps.freeze = vi.fn(() => {
+      t.frozen = true // the first tabs are frozen ...
+      throw new Error('plugin failed') // ... then a reconfigure throws
+    })
+    await expect(closeWindow(steps)).rejects.toThrow('plugin failed')
+    expect(steps.unfreeze).toHaveBeenCalled()
+    expect(t.frozen).toBe(false)
+  })
 })

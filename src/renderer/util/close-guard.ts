@@ -19,8 +19,9 @@ export interface CloseSteps {
  * only then close. Anything left unsaved goes to the discard prompt; a cancel thaws the input.
  */
 export async function closeWindow(steps: CloseSteps): Promise<boolean> {
-  steps.freeze()
   try {
+    // Inside the try: a freeze that throws partway thaws again (unfreeze is idempotent).
+    steps.freeze()
     let saved = await steps.flush()
     for (let i = 0; saved && i < MAX_CLOSE_ROUNDS && steps.pending().length > 0; i++) {
       saved = await steps.saveAll()

@@ -50,6 +50,8 @@ export class AppContext {
   private readonly pending: string[] = []
   private rendererReady = false
   private closeApproved = false
+  /** A beforeClose was sent and not answered yet; answers without one are stale and ignored. */
+  private closeRequested = false
   private quitting = false
   private initialized = false
   private sessionWrite: Promise<void> = Promise.resolve()
@@ -97,10 +99,12 @@ export class AppContext {
     this.fullScreen = new FullScreenOwner()
     this.rendererReady = false
     this.closeApproved = false
+    this.closeRequested = false
     win.on('close', (e) => {
       // Without a running renderer nobody could answer beforeClose: do not trap the window.
       if (this.closeApproved || !this.rendererReady) return
       e.preventDefault()
+      this.closeRequested = true
       this.send(Ch.beforeClose)
     })
     win.webContents.on('before-input-event', (_e, input) => this.presentKey.onInput(input))
@@ -178,12 +182,14 @@ export class AppContext {
   }
 
   closeReady(ok: boolean): void {
+    // A repeated close request is answered twice: only the first answer counts.
+    if (!this.closeRequested) return
+    this.closeRequested = false
     if (!ok) {
       this.quitting = false
       return
     }
     this.closeApproved = true
-    // A repeated close request is answered twice; the second may find the window gone.
     if (this.window && !this.window.isDestroyed()) this.window.close()
     if (this.quitting) app.quit()
   }
