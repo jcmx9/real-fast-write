@@ -6,6 +6,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Snippets: `:meeting`, `:telefonnotiz`, `:aufgabe`, `:header`, `:newpage` and own `*.tpl.md` templates, triggered with `:`
+- A fold opens when the cursor moves into it
 - Present mode: fullscreen, larger text, title block, info line with clock, tabs, zoom and save state; Esc returns to Edit
 - Zoom per mode (Edit/Present), restored after restart
 - Electron app with tabs and a CodeMirror 6 Markdown editor

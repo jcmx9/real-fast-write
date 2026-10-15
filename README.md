@@ -52,6 +52,20 @@ Die Preview nutzt die Schriften von rf-document aus dessen Installationsordner u
 
 `Mod` = Cmd unter macOS, sonst Ctrl. Die Auswahl mit Shift bzw. Mod+Shift und den Pfeiltasten übernimmt CodeMirror.
 
+## Snippets
+
+Tippe `:` und mindestens einen Buchstaben (z. B. `:mee`), dann erscheint die Liste der Snippets; Strg+Leertaste zeigt nach einem einzelnen `:` alle. Enter oder Tab fügt das Snippet ein, Tab / Shift+Tab springen durch die Felder. Prosa wie `Hinweis:` oder `:D` löst nichts aus.
+
+| Snippet | Inhalt |
+|---------|--------|
+| `:meeting` | Meeting-Notiz mit Header, Teilnehmern, Agenda, Mitschrift und Aufgaben |
+| `:telefonnotiz` | Telefonnotiz |
+| `:aufgabe` | Aufgabenzeile `- [ ] Aufgabe – Name, bis Datum` |
+| `:header` | YAML-Header mit allen rf-document-Schlüsseln |
+| `:newpage` | Seitenumbruch `<!-- pagebreak -->` |
+
+Eigene Snippets sind Dateien `name.tpl.md` im Snippet-Ordner (Standard `~/Documents/rf-write/snippets`, Einstellung `snippetFolder`). Ein eigenes Snippet mit demselben Namen ersetzt das eingebaute. Neue Dateien werden beim nächsten Fokus des Fensters erkannt. Unterstützte Syntax: `$1`, `${1:Vorgabe}`, `$0` (Endposition) sowie `$CURRENT_YEAR`, `$CURRENT_MONTH`, `$CURRENT_DATE`, `$CURRENT_HOUR`, `$CURRENT_MINUTE`, `$CURRENT_SECOND`.
+
 ## Entwicklung
 
 ```bash
