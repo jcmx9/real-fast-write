@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
-import type { Eol, NoteFile } from '../shared/types'
+import type { Eol, ExternalChange, NoteFile } from '../shared/types'
 
 const BOM = '\uFEFF'
 /** Codes that are often transient on Windows (AV scanners, sync clients, delete pending). */
@@ -122,11 +122,16 @@ export function decodeNote(path: string, bytes: Uint8Array): NoteFile {
   return { path, text, bom, eol: detectEol(text), hash: hashBytes(bytes) }
 }
 
-/** Writes via temp file + fsync + rename; never leaves a half-written target. */
+/**
+ * Writes via temp file + fsync + rename; never leaves a half-written target.
+ * `beforeRename` runs after the temp file is complete and right before the rename, so a check
+ * of the target there is as close to the replace as possible; if it throws, nothing is replaced.
+ */
 export async function writeFileAtomic(
   path: string,
   data: Uint8Array,
   deps: AtomicDeps = defaultDeps,
+  beforeRename?: () => Promise<void>,
 ): Promise<void> {
   const tmp = join(dirname(path), `.${basename(path)}.${randomBytes(6).toString('hex')}.tmp`)
   const mode = await fs.stat(path).then(
@@ -144,6 +149,7 @@ export async function writeFileAtomic(
     throw err
   }
   try {
+    await beforeRename?.()
     for (let attempt = 0; ; attempt++) {
       try {
         await deps.rename(tmp, path)
@@ -169,8 +175,51 @@ async function realTarget(path: string): Promise<string> {
   }
 }
 
-export async function writeNoteBytes(path: string, bytes: Uint8Array): Promise<void> {
-  await writeFileAtomic(await realTarget(path), bytes)
+export async function writeNoteBytes(
+  path: string,
+  bytes: Uint8Array,
+  beforeRename?: () => Promise<void>,
+): Promise<void> {
+  await writeFileAtomic(await realTarget(path), bytes, defaultDeps, beforeRename)
+}
+
+/** What is on disk now, if it is not the content a save was based on. */
+export interface DiskConflict {
+  change: ExternalChange
+  /** Hash of the bytes found; absent when the file is missing. */
+  hash?: string
+}
+
+/**
+ * Compares the bytes at `path` with the hash the caller's content is based on (`null`: a new
+ * note whose file must not exist yet). Returns null when they match or `isOwn` recognises the
+ * bytes as rf-write's own; else the disk state as an external change. A missing file with a base
+ * counts as deleted. Read errors other than ENOENT are thrown: nothing is written over bytes
+ * that could not be compared.
+ */
+export async function diskConflict(
+  path: string,
+  base: string | null,
+  isOwn: (hash: string) => boolean,
+): Promise<DiskConflict | null> {
+  let bytes: Buffer
+  try {
+    bytes = await fs.readFile(path)
+  } catch (err) {
+    if (errorCode(err) !== 'ENOENT') throw err
+    return base === null ? null : { change: { kind: 'deleted', path } }
+  }
+  const hash = hashBytes(bytes)
+  if (hash === base || isOwn(hash)) return null
+  try {
+    return { change: { kind: 'changed', note: decodeNote(path, bytes) }, hash }
+  } catch (err) {
+    if (!(err instanceof NotUtf8Error)) throw err
+    return {
+      change: { kind: 'unreadable', path, reason: 'encoding', message: err.message },
+      hash,
+    }
+  }
 }
 
 export async function writeNote(path: string, text: string, bom: boolean): Promise<string> {

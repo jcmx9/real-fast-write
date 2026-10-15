@@ -183,3 +183,29 @@ test('a held clean tab is marked unsaved in the tab bar and in the Present info 
   await expect(page.getByTestId('il-tab')).toHaveCount(1)
   await app.close()
 })
+
+test('a save right after an external write (inside the watcher debounce) does not overwrite it', async () => {
+  const dirs = await makeDirs()
+  const file = join(dirs.notes, 'knapp.md')
+  await writeFile(file, 'alt')
+  const { app, page } = await launch({ dirs, args: [file] })
+  await expect(page.locator('.cm-content')).toContainText('alt')
+  await typeInEditor(page, ' meins')
+  // The external write lands, and the save runs at once: long before the watcher's 200 ms
+  // debounce could report the change (blur flushes the autosave).
+  await writeFile(file, 'von außen')
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')))
+  const banner = page.locator('.banner')
+  await expect(banner).toHaveText(/„knapp\.md“ wurde außerhalb von rf-write geändert\./)
+  await expect(page.getByTestId('status-state')).toHaveText(
+    /Externe Änderung – bitte im Hinweis entscheiden/,
+  )
+  await page.waitForTimeout(1500)
+  expect(await readFile(file, 'utf8')).toBe('von außen')
+  await expect(banner).toHaveCount(1)
+  // „Meine behalten“ is the explicit overwrite.
+  await banner.getByRole('button', { name: 'Meine behalten' }).click()
+  await waitForFile(file, (b) => b.toString('utf8') === 'alt meins')
+  await expect(page.getByTestId('status-state')).toHaveText('Gespeichert')
+  await app.close()
+})

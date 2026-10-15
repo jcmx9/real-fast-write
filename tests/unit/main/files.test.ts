@@ -17,6 +17,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import {
   canonicalPath,
   detectEol,
+  diskConflict,
   hashBytes,
   NotUtf8Error,
   newNotePath,
@@ -156,6 +157,87 @@ describe('writeFileAtomic', () => {
     ).rejects.toThrow('io')
     expect(await readFile(path, 'utf8')).toBe('original')
     expect(await readdir(dir)).toEqual(['orig.md'])
+  })
+})
+
+describe('writeFileAtomic beforeRename', () => {
+  it('runs after the temp file is complete, right before the rename', async () => {
+    const path = join(dir, 'check.md')
+    await writeFile(path, 'alt')
+    let seen: { target: string; temp: string } | null = null
+    await writeFileAtomic(path, noteBytes('neu', false), undefined, async () => {
+      const temp = (await readdir(dir)).find((n) => n.endsWith('.tmp'))
+      seen = {
+        target: await readFile(path, 'utf8'),
+        temp: temp ? await readFile(join(dir, temp), 'utf8') : '',
+      }
+    })
+    expect(seen).toEqual({ target: 'alt', temp: 'neu' })
+    expect(await readFile(path, 'utf8')).toBe('neu')
+  })
+
+  it('replaces nothing and removes the temp file when it throws', async () => {
+    const path = join(dir, 'refused.md')
+    await writeFile(path, 'extern')
+    await expect(
+      writeFileAtomic(path, noteBytes('neu', false), undefined, async () => {
+        throw new Error('conflict')
+      }),
+    ).rejects.toThrow('conflict')
+    expect(await readFile(path, 'utf8')).toBe('extern')
+    expect(await readdir(dir)).toEqual(['refused.md'])
+  })
+})
+
+describe('diskConflict', () => {
+  const never = () => false
+
+  it('is null when the bytes match the base', async () => {
+    const path = join(dir, 'a.md')
+    await writeFile(path, 'x')
+    expect(await diskConflict(path, hashBytes(Buffer.from('x')), never)).toBeNull()
+  })
+
+  it('is null when the bytes are our own', async () => {
+    const path = join(dir, 'a.md')
+    await writeFile(path, 'x')
+    const own = hashBytes(Buffer.from('x'))
+    expect(await diskConflict(path, 'alt', (h) => h === own)).toBeNull()
+  })
+
+  it('is null for a missing file without base, deleted with base', async () => {
+    const path = join(dir, 'fehlt.md')
+    expect(await diskConflict(path, null, never)).toBeNull()
+    expect(await diskConflict(path, 'alt', never)).toEqual({
+      change: { kind: 'deleted', path },
+    })
+  })
+
+  it('returns changed content with its hash', async () => {
+    const path = join(dir, 'a.md')
+    await writeFile(path, 'neu')
+    const res = await diskConflict(path, 'alt', never)
+    expect(res?.hash).toBe(hashBytes(Buffer.from('neu')))
+    expect(res?.change).toMatchObject({ kind: 'changed', note: { text: 'neu' } })
+  })
+
+  it('returns invalid UTF-8 as unreadable', async () => {
+    const path = join(dir, 'a.md')
+    await writeFile(path, Buffer.from([0xfc]))
+    const res = await diskConflict(path, 'alt', never)
+    expect(res?.change).toMatchObject({ kind: 'unreadable', reason: 'encoding' })
+  })
+
+  posixOnly('throws other read errors', async () => {
+    if (process.getuid?.() === 0) return
+    const path = join(dir, 'a.md')
+    await writeFile(path, 'x')
+    await chmod(path, 0o000)
+    try {
+      await expect(diskConflict(path, 'alt', never)).rejects.toMatchObject({ code: 'EACCES' })
+    } finally {
+      await chmod(path, 0o644)
+    }
   })
 })
 

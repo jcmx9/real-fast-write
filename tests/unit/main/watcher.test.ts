@@ -271,6 +271,56 @@ function failingRead(code: string, failures: () => number) {
   }
 }
 
+describe('NoteWatcher own content (save base check)', () => {
+  it('knows own writes and loads, not the baseline', async () => {
+    const path = join(dir, 'o.md')
+    await writeFile(path, 'basis')
+    watcher.setFiles([path])
+    expect(watcher.isOwn(path, hashBytes(noteBytes('basis', false)))).toBe(false)
+    watcher.expect(path, hashBytes(noteBytes('meins', false)))
+    expect(watcher.isOwn(path, hashBytes(noteBytes('meins', false)))).toBe(true)
+  })
+
+  it('forgets own content once an external change was reported', async () => {
+    const path = join(dir, 'o2.md')
+    await writeFile(path, 'x')
+    watcher.setFiles([path])
+    const mine = hashBytes(noteBytes('meins', false))
+    watcher.expect(path, mine)
+    await writeNote(path, 'meins', false)
+    await sleep(300)
+    await writeFile(path, 'extern')
+    await waitFor(() => changes.length > 0)
+    expect(watcher.isOwn(path, mine)).toBe(false)
+  })
+
+  it('acknowledge() keeps a state handed over by a refused save from being reported', async () => {
+    const path = join(dir, 'ack.md')
+    await writeFile(path, 'alt')
+    watcher.setFiles([path])
+    await sleep(150)
+    await writeFile(path, 'extern')
+    watcher.acknowledge(path, hashBytes(Buffer.from('extern')))
+    await sleep(500)
+    expect(events).toEqual([])
+    expect(watcher.isOwn(path, hashBytes(Buffer.from('extern')))).toBe(false)
+  })
+
+  it('acknowledge(null) records a deletion: no second report, a recreation is reported', async () => {
+    const path = join(dir, 'weg.md')
+    await writeFile(path, 'alt')
+    watcher.setFiles([path])
+    await sleep(150)
+    await rm(path)
+    watcher.acknowledge(path, null)
+    await sleep(600)
+    expect(events).toEqual([])
+    await writeFile(path, 'alt')
+    await waitFor(() => events.length > 0)
+    expect(events).toEqual([expect.objectContaining({ kind: 'changed' })])
+  })
+})
+
 describe('NoteWatcher read errors', () => {
   function withRead(read: (p: string) => Promise<Buffer>): void {
     watcher.close()

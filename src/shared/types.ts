@@ -61,7 +61,11 @@ export interface StartupState {
   fonts: FontStatus
 }
 
-export type SaveResult = { ok: true; hash: string } | { ok: false; error: string }
+export type SaveResult =
+  | { ok: true; hash: string }
+  | { ok: false; error: string }
+  /** Refused without writing: the file changed outside since the tab's base. */
+  | { ok: false; conflict: ExternalChange }
 export type RenameResult = { ok: true; path: string } | { ok: false; error: string }
 export type ExportResult =
   | { kind: 'ok'; message: string }
@@ -97,7 +101,17 @@ export interface RfwApi {
   readNote(path: string): Promise<NoteFile | { error: string }>
   newNotePath(): Promise<string>
   releasePath(path: string): Promise<void>
-  saveNote(path: string, text: string, bom: boolean): Promise<SaveResult>
+  /**
+   * base: hash of the bytes the tab last loaded or saved (null for a note not on disk yet);
+   * force: the user chose to overwrite whatever is on disk.
+   */
+  saveNote(
+    path: string,
+    text: string,
+    bom: boolean,
+    base: string | null,
+    force: boolean,
+  ): Promise<SaveResult>
   renameNote(from: string, newName: string): Promise<RenameResult>
   showOpenDialog(): Promise<string[]>
   exportPdf(path: string): Promise<ExportResult>

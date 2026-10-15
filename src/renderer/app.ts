@@ -105,6 +105,12 @@ export class App {
   private readonly holdWarnings = new Map<number, string>()
   /** Hash of the bytes each tab last loaded or saved, to recognise our own content on disk. */
   private readonly savedHashes = new Map<number, string>()
+  /**
+   * Tabs whose next write may replace whatever is on disk: the user chose to keep or save their
+   * version over an external change, a deletion or unreadable bytes. Cleared by the next
+   * successful write and by every new external change.
+   */
+  private readonly overwrite = new Set<number>()
   private readonly saving = new Map<number, Promise<boolean>>()
   private sessionTimer: ReturnType<typeof setTimeout> | null = null
   /** The running window close; input into every tab is frozen while it is set. */
@@ -524,6 +530,7 @@ export class App {
     this.unwritten.delete(id)
     this.holdWarnings.delete(id)
     this.savedHashes.delete(id)
+    this.overwrite.delete(id)
     this.saving.delete(id)
     // Present never shows the empty state.
     if (this.mode === 'present' && this.store.all.length === 0) await this.exitPresent()
@@ -621,18 +628,28 @@ export class App {
     const doc = tab.state.doc
     let res: Awaited<ReturnType<typeof this.rfw.saveNote>>
     try {
-      res = await this.rfw.saveNote(tab.path, serializeDoc(doc, tab.eol), tab.bom)
+      // Main writes only over the base (or our own newer write) unless the user chose to
+      // overwrite: an external change inside the watcher's debounce is never replaced silently.
+      res = await this.rfw.saveNote(
+        tab.path,
+        serializeDoc(doc, tab.eol),
+        tab.bom,
+        this.savedHashes.get(tab.id) ?? null,
+        this.overwrite.has(tab.id),
+      )
     } catch (e) {
       res = { ok: false, error: e instanceof Error ? e.message : String(e) }
     }
     if (!res.ok) {
-      this.saveErrors.set(tab.id, res.error)
+      if ('conflict' in res) this.externalChange(res.conflict)
+      else this.saveErrors.set(tab.id, res.error)
       this.refresh()
       return false
     }
     const firstSave = !tab.onDisk
     this.store.markSaved(tab.id, doc)
     this.savedHashes.set(tab.id, res.hash)
+    this.overwrite.delete(tab.id)
     this.unwritten.delete(tab.id)
     this.saveErrors.delete(tab.id)
     if (firstSave) this.syncMain()
@@ -701,6 +718,11 @@ export class App {
   }
 
   private externalChange(change: ExternalChange): void {
+    const changed = this.store.findByPath(
+      change.kind === 'changed' ? change.note.path : change.path,
+    )
+    // A new external state needs a new decision before anything overwrites it.
+    if (changed) this.overwrite.delete(changed.id)
     if (change.kind !== 'changed') {
       this.holdUnloadable(change)
       return
@@ -742,6 +764,7 @@ export class App {
           label: 'Meine behalten',
           run: () => {
             this.clearConflict(tab.id)
+            this.overwrite.add(tab.id)
             this.refresh()
             this.autosave.touch()
           },
@@ -783,6 +806,7 @@ export class App {
           label: saveLabel,
           run: () => {
             this.clearConflict(tab.id)
+            this.overwrite.add(tab.id)
             this.refresh()
             void this.saveTab(tab)
           },
@@ -814,6 +838,7 @@ export class App {
     const state = this.closingState(
       createState(note.text, note.eol, this.effectiveView(), tab.headerHidden, this.mode),
     )
+    const wasOnDisk = tab.onDisk
     tab.bom = note.bom
     tab.eol = note.eol
     this.savedHashes.set(tab.id, note.hash)
@@ -824,6 +849,8 @@ export class App {
       this.editor.setState(state)
       this.outline.invalidate()
     }
+    // A new note whose path a file took meanwhile (refused first save) is now watched.
+    if (!wasOnDisk) this.syncMain()
     this.refresh()
   }
 

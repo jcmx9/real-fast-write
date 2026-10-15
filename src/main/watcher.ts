@@ -6,6 +6,11 @@ import { decodeNote, errorCode, hashBytes, NotUtf8Error, RETRY_CODES } from './f
 interface Known {
   /** Hashes of content that is not reported (own writes, the baseline, reported content). */
   accepted: Set<string>
+  /**
+   * Content rf-write itself wrote or loaded since the last external change: a save based on an
+   * older hash may replace it (see `isOwn`). Reported and baseline content is not in here.
+   */
+  own: Set<string>
   latest: string
   /** Set while the file is reported as deleted or unreadable; a later readable state is reported. */
   failure?: 'deleted' | 'error'
@@ -63,7 +68,7 @@ export class NoteWatcher {
       if (this.known.has(p)) continue
       try {
         const seed = hashBytes(readFileSync(p))
-        this.known.set(p, { accepted: new Set([seed]), latest: seed })
+        this.known.set(p, { accepted: new Set([seed]), own: new Set(), latest: seed })
       } catch {
         // Missing or unreadable (e.g. a new, unsaved note): nothing to baseline.
       }
@@ -127,12 +132,31 @@ export class NoteWatcher {
     const entry = this.known.get(path)
     if (entry) {
       entry.accepted.add(hash)
+      entry.own.add(hash)
       entry.latest = hash
       // Our own write replaces whatever made the file missing or unreadable.
       entry.failure = undefined
     } else {
-      this.known.set(path, { accepted: new Set([hash]), latest: hash })
+      this.known.set(path, { accepted: new Set([hash]), own: new Set([hash]), latest: hash })
     }
+  }
+
+  /** Whether `hash` is content rf-write wrote or loaded since the last external change. */
+  isOwn(path: string, hash: string): boolean {
+    return this.known.get(path)?.own.has(hash) === true
+  }
+
+  /**
+   * Records a disk state that was already handed to the renderer another way (a refused save),
+   * so it is not reported a second time: `hash` of the bytes found, or null for a missing file.
+   */
+  acknowledge(path: string, hash: string | null): void {
+    this.known.set(
+      path,
+      hash === null
+        ? { accepted: new Set(), own: new Set(), latest: '', failure: 'deleted' }
+        : { accepted: new Set([hash]), own: new Set(), latest: hash },
+    )
   }
 
   close(): void {
@@ -180,12 +204,13 @@ export class NoteWatcher {
       if (entry?.latest === hash) {
         // Settled on our newest write: only that content is accepted from now on.
         entry.accepted = new Set([hash])
+        entry.own = entry.own.has(hash) ? new Set([hash]) : new Set()
         return
       }
       if (entry?.accepted.has(hash)) return
     }
     // Accept these bytes before decoding, so the same bytes are reported only once.
-    this.known.set(path, { accepted: new Set([hash]), latest: hash })
+    this.known.set(path, { accepted: new Set([hash]), own: new Set(), latest: hash })
     let note: NoteFile
     try {
       note = decodeNote(path, bytes)
@@ -210,7 +235,7 @@ export class NoteWatcher {
         return
       }
       // Nothing is accepted any more: a later file at this path is reported, unless it is ours.
-      this.known.set(path, { accepted: new Set(), latest: '', failure: 'deleted' })
+      this.known.set(path, { accepted: new Set(), own: new Set(), latest: '', failure: 'deleted' })
       this.onChange({ kind: 'deleted', path })
       return
     }
@@ -222,6 +247,7 @@ export class NoteWatcher {
     }
     this.known.set(path, {
       accepted: entry?.accepted ?? new Set(),
+      own: entry?.own ?? new Set(),
       latest: entry?.latest ?? '',
       failure: 'error',
     })

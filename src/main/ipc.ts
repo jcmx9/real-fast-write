@@ -5,6 +5,8 @@ import { type AppContext, logSessionError } from './context'
 import {
   canonicalPath,
   canonicalPaths,
+  type DiskConflict,
+  diskConflict,
   hashBytes,
   newNotePath,
   noteBytes,
@@ -20,6 +22,9 @@ const str = (v: unknown): string => {
   return v
 }
 const message = (err: unknown): string => (err instanceof Error ? err.message : String(err))
+
+/** Aborts a save before its rename because the disk no longer holds the tab's base. */
+class SaveConflict extends Error {}
 
 export function registerIpc(ctx: AppContext): void {
   ipcMain.handle(Ch.startup, () => ctx.startup())
@@ -76,15 +81,50 @@ export function registerIpc(ctx: AppContext): void {
     ctx.reserved.delete(await canonicalPath(str(path)))
   })
 
+  /**
+   * Saves only over the content the tab is based on (`base`: hash of the bytes it last loaded or
+   * saved, null for a new note whose file must not exist yet) or over rf-write's own newer write.
+   * Anything else on disk was written outside and may not have been reported yet (watcher
+   * debounce): the save is refused and the disk state returned, so the renderer runs its
+   * external-change flow. `force` is the user's explicit overwrite and skips the check.
+   *
+   * The check runs after the temp file is complete, right before the atomic rename. A write by
+   * another program between that read and the rename is still replaced (residual race of a few
+   * milliseconds, longer only while a rename is retried on a locked target on Windows); the
+   * watcher then reports nothing, because the bytes on disk are ours.
+   */
   ipcMain.handle(
     Ch.saveNote,
-    async (_e, path: unknown, text: unknown, bom: unknown): Promise<SaveResult> => {
+    async (
+      _e,
+      path: unknown,
+      text: unknown,
+      bom: unknown,
+      base: unknown,
+      force: unknown,
+    ): Promise<SaveResult> => {
       try {
         const p = await ctx.assertAllowed(str(path))
+        const baseHash = base === null || base === undefined ? null : str(base)
         const bytes = noteBytes(str(text), bom === true)
         const hash = hashBytes(bytes)
-        ctx.watcher.expect(p, hash)
-        await writeNoteBytes(p, bytes)
+        let conflict: DiskConflict | null = null
+        try {
+          await writeNoteBytes(p, bytes, async () => {
+            if (force !== true) {
+              conflict = await diskConflict(p, baseHash, (h) => ctx.watcher.isOwn(p, h))
+              if (conflict) throw new SaveConflict()
+            }
+            // Before the rename, so the watcher never reports our own write.
+            ctx.watcher.expect(p, hash)
+          })
+        } catch (err) {
+          const found = conflict as DiskConflict | null
+          if (!(err instanceof SaveConflict) || !found) throw err
+          // The renderer handles this state now; the watcher must not report it again.
+          ctx.watcher.acknowledge(p, found.hash ?? null)
+          return { ok: false, conflict: found.change }
+        }
         if (ctx.reserved.delete(p)) void ctx.rememberRecent(p).catch(logSessionError)
         return { ok: true, hash }
       } catch (err) {

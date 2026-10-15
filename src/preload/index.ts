@@ -7,7 +7,8 @@ const api: RfwApi = {
   readNote: (path) => ipcRenderer.invoke(Ch.readNote, path),
   newNotePath: () => ipcRenderer.invoke(Ch.newNotePath),
   releasePath: (path) => ipcRenderer.invoke(Ch.releasePath, path),
-  saveNote: (path, text, bom) => ipcRenderer.invoke(Ch.saveNote, path, text, bom),
+  saveNote: (path, text, bom, base, force) =>
+    ipcRenderer.invoke(Ch.saveNote, path, text, bom, base, force),
   renameNote: (from, newName) => ipcRenderer.invoke(Ch.renameNote, from, newName),
   showOpenDialog: () => ipcRenderer.invoke(Ch.openDialog),
   exportPdf: (path) => ipcRenderer.invoke(Ch.exportPdf, path),
