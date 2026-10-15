@@ -1,4 +1,4 @@
-# Packaging for `npm run dist` (current OS only). See docs/superpowers/plans/2026-10-15-rf-write-07-distribution.md.
+# Packaging for `npm run dist` (current OS only). Release flow: docs/github-release.md.
 appId: io.github.jcmx9.rfwrite
 productName: rf-write
 directories:

@@ -87,7 +87,11 @@ cut): the release is published, nothing was pushed to `dev`. Finish by hand:
 
 ```bash
 git checkout -b chore/back-merge-<v> origin/dev
-git merge --no-ff origin/main          # resolve the conflicts (version lines and CHANGELOG may conflict too)
+# Same recipe as the script: record main as merged without taking its tree, then apply only
+# what the release commit changed (version + CHANGELOG). A plain merge would use an older merge
+# base and could bring back changes that dev reverted after the release was cut.
+git merge -s ours --no-commit origin/main
+git diff "<Release-Source of the release commit>" origin/main | git apply -3
 npm version <v+1>-dev.0 --no-git-tag-version --allow-same-version
 git commit -am "chore(release): back-merge v<v> into dev"
 git push -u origin chore/back-merge-<v>
