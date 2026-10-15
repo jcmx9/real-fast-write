@@ -185,26 +185,51 @@ html.rf-justify .rf-preview .cm-line {
 }
 
 /* Lists: rf-document's small square */
-.rf-preview .rf-bullet {
-  position: relative;
+.rf-preview .rf-bullet,
+.rf-preview .rf-list-mark {
+  /* rf-document's marker-slot: bullet square and task box share one 0.72em field */
   display: inline-block;
   width: 0.72em;
+  /* + the visible space ≈ rf-document's body-indent 0.4em */
+  margin-right: 0.15em;
+  text-align: center;
 }
 .rf-preview .rf-bullet::before {
-  position: absolute;
-  top: 50%;
-  left: 0.2em;
+  display: inline-block;
   width: 0.32em;
   height: 0.32em;
   background: var(--rfd-chrome);
+  vertical-align: 0.2em;
   content: "";
-  transform: translateY(-35%);
 }
 .rf-preview .rf-task {
-  margin: 0 0.35em 0 0;
+  appearance: none;
+  position: relative;
+  /* inputs do not inherit the font: the em sizes must refer to the text */
+  font: inherit;
+  width: 0.72em;
+  height: 0.72em;
+  margin: 0 0.15em 0 0;
+  border: 0.7pt solid var(--rfd-task-border);
+  border-radius: 1.5pt;
+  background: transparent;
   vertical-align: -0.1em;
-  accent-color: var(--rfd-chrome);
   cursor: pointer;
+}
+.rf-preview .rf-task:checked {
+  border-color: var(--rfd-chrome);
+  background: var(--rfd-chrome);
+}
+.rf-preview .rf-task:checked::after {
+  position: absolute;
+  inset: 0;
+  color: #fff;
+  font-size: 0.62em;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  content: "\2713";
 }
 
 /* Quotes: italic, indented both sides */
@@ -357,7 +382,7 @@ html.rf-justify .rf-preview .cm-line {
   cursor: default;
 }
 .rf-preview .rf-tb-client {
-  margin-bottom: 1em;
+  margin-bottom: 1.11em;
   font-size: 0.9em;
   letter-spacing: 0.12em;
   text-transform: uppercase;

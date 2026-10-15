@@ -112,10 +112,10 @@ function build(state: EditorState): DecorationSet {
   const doc = state.doc
   syntaxTree(state).iterate({
     enter: (n) => {
-      if (n.name === 'Frontmatter') return false
-      if (n.name !== 'Table') return undefined
-      for (let a = n.node.parent; a; a = a.parent)
-        if (a.name === 'Blockquote' || a.name === 'ListItem') return false
+      // Only top-level tables (direct children of Document): no deep walk into other blocks,
+      // so tables inside blockquotes and list items stay raw.
+      if (n.name === 'Document') return undefined
+      if (n.name !== 'Table') return false
       const from = doc.lineAt(n.from).from
       const to = doc.lineAt(Math.max(n.from, n.to - 1)).to
       const touched = state.selection.ranges.some((r) => r.from <= to && r.to >= from)

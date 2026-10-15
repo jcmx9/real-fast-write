@@ -4,14 +4,14 @@ import { ensureSyntaxTree } from '@codemirror/language'
 import { EditorState } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import { describe, expect, it } from 'vitest'
-import { previewPlugin, toggleTaskAt } from '../../../src/renderer/editor/preview'
+import { alertTitle, previewPlugin, toggleTaskAt } from '../../../src/renderer/editor/preview'
 import { rf } from './preview-helper'
 
 describe('lists and tasks', () => {
   it('replaces the bullet by a square away from the cursor', () => {
     expect(rf('- Punkt')).toContain('bullet@0-1')
     const near = rf('- Punkt', 3)
-    expect(near).toContain('mark:rf-mark@0-1')
+    expect(near).toContain('mark:rf-mark rf-list-mark@0-1')
     expect(near).not.toContain('bullet@0-1')
   })
   it('replaces * and + bullets too', () => {
@@ -51,6 +51,26 @@ describe('quotes and alerts', () => {
     expect(d).toContain('alert-title@0-9')
     expect(d).not.toContain('hide@2-3')
     expect(d.some((x) => x.startsWith('mark:rf-link@2'))).toBe(false)
+  })
+})
+
+describe('alert titles follow the lang field', () => {
+  const title = (text: string) => alertTitle(EditorState.create({ doc: text }), 'warning')
+  it.each([
+    ['no front matter', '> x', 'Hinweis'],
+    ['lang de', '---\nlang: de\n---\n', 'Hinweis'],
+    ['lang de-AT', '---\nlang: "de-AT"\n---\n', 'Hinweis'],
+    ['lang en', '---\nlang: en\n---\n', 'Warning'],
+    ['lang en-GB', '---\nlang: en-GB\n---\n', 'Warning'],
+    ['other lang falls back to en like template.typ', '---\nlang: fr\n---\n', 'Warning'],
+  ])('%s', (_name, doc, expected) => {
+    expect(title(doc)).toBe(expected)
+  })
+  it('maps every kind in English', () => {
+    const s = EditorState.create({ doc: '---\nlang: en\n---\n' })
+    expect(['note', 'tip', 'important', 'warning', 'caution'].map((k) => alertTitle(s, k))).toEqual(
+      ['Note', 'Tip', 'Important', 'Warning', 'Caution'],
+    )
   })
 })
 

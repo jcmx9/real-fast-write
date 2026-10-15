@@ -9,6 +9,7 @@ import {
   WidgetType,
 } from '@codemirror/view'
 import type { SyntaxNode, SyntaxNodeRef } from '@lezer/common'
+import { frontmatterFields } from './frontmatter'
 
 export type PreviewRange = { from: number; to: number }
 
@@ -16,6 +17,7 @@ const hide = Decoration.replace({ rf: 'hide' })
 const lineDeco = (cls: string) => Decoration.line({ class: cls, rf: `line:${cls}` })
 const markDeco = (cls: string) => Decoration.mark({ class: cls, rf: `mark:${cls}` })
 const faint = markDeco('rf-mark')
+const listMark = markDeco('rf-mark rf-list-mark')
 
 const INLINE: Record<string, { cls: string; marks: string[] }> = {
   Emphasis: { cls: 'rf-em', marks: ['EmphasisMark'] },
@@ -135,12 +137,17 @@ export function visitInline(cx: PreviewCx, ref: SyntaxNodeRef): boolean | undefi
   return
 }
 
-const ALERT_TITLES: Record<string, string> = {
-  note: 'Info',
-  tip: 'Tipp',
-  important: 'Wichtig',
-  warning: 'Hinweis',
-  caution: 'Achtung',
+/** rf-document's alert titles per `lang` (template.typ labels), German without `lang`. */
+const ALERT_TITLES: Record<'de' | 'en', Record<string, string>> = {
+  de: { note: 'Info', tip: 'Tipp', important: 'Wichtig', warning: 'Hinweis', caution: 'Achtung' },
+  en: { note: 'Note', tip: 'Tip', important: 'Important', warning: 'Warning', caution: 'Caution' },
+}
+
+export function alertTitle(state: EditorState, type: string): string {
+  // template.typ label-text: the first two letters pick the labels, unknown ones fall back to en.
+  const lang = (frontmatterFields(state.doc).lang ?? '').trim().toLowerCase() || 'de'
+  const titles = lang.startsWith('de') ? ALERT_TITLES.de : ALERT_TITLES.en
+  return titles[type] ?? type
 }
 const ALERT_RE = /^\s*>\s*\[!(note|tip|important|warning|caution)\]\s*$/i
 
@@ -226,7 +233,8 @@ export function visitBlock(cx: PreviewCx, ref: SyntaxNodeRef): boolean | undefin
         const space = doc.sliceString(ref.to, ref.to + 1) === ' ' ? 1 : 0
         out.push(hide.range(ref.from, ref.to + space))
       } else if (cx.onLine(ref.from)) {
-        out.push(faint.range(ref.from, ref.to))
+        // Same slot as the square, so the text does not shift when the mark is revealed.
+        out.push(listMark.range(ref.from, ref.to))
       } else {
         out.push(
           Decoration.replace({ widget: new BulletWidget(), rf: 'bullet' }).range(ref.from, ref.to),
@@ -251,7 +259,7 @@ export function visitBlock(cx: PreviewCx, ref: SyntaxNodeRef): boolean | undefin
           cx.replacedLines.add(first.from)
           out.push(
             Decoration.replace({
-              widget: new AlertTitleWidget(ALERT_TITLES[type] ?? type),
+              widget: new AlertTitleWidget(alertTitle(state, type)),
               rf: 'alert-title',
             }).range(first.from, first.to),
           )
