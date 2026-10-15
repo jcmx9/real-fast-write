@@ -257,7 +257,3 @@ dialog.prompt label {
 .cm-tooltip-autocomplete > ul > li[aria-selected] .cm-completionDetail {
   color: inherit;
 }
-.cm-completionMatchedText {
-  text-decoration: none;
-  font-weight: 600;
-}
