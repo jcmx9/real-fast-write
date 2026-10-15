@@ -38,14 +38,18 @@ export function snippetSource(ctx: CompletionContext): CompletionResult | null {
   if (!m) return null
   const colon = m.from + m.text.indexOf(':')
   if (colon === ctx.pos - 1 && !ctx.explicit) return null
+  // Strict, case-insensitive prefix match: `:D`, `:P` (emoticons) match nothing, so Enter stays a newline.
+  const typed = m.text.slice(m.text.indexOf(':') + 1).toLowerCase()
+  const options = merged.filter((s) => s.name.toLowerCase().startsWith(typed)).map(option)
+  if (options.length === 0) return null
   return {
     from: colon,
-    options: merged.map(option),
-    validFor: /^:[\p{L}\p{M}\p{N}_-]*$/u,
+    options,
+    filter: false,
   }
 }
 
 export const snippetExtensions: Extension = [
   autocompletion({ override: [snippetSource], icons: false, defaultKeymap: true }),
-  Prec.high(keymap.of([{ key: 'Tab', run: acceptCompletion }])),
+  Prec.highest(keymap.of([{ key: 'Tab', run: acceptCompletion }])),
 ]

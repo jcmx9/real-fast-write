@@ -45,12 +45,23 @@ describe('snippetSource', () => {
     ])
   })
 
+  it.each([
+    ['Super :D', null],
+    [':P', null],
+    [':me', [':meeting']],
+    [':H', [':header']],
+  ])('prefix filter %j -> %j', (doc, expected) => {
+    expect(labels(doc)).toEqual(expected)
+  })
+
   it('replaces from the colon', () => {
     expect(snippetSource(ctx('x :mee'))?.from).toBe(2)
   })
 
   it('matches combining marks like the name regex', () => {
-    expect(labels(':café')).not.toBeNull()
+    const name = 'cafe\u0301'
+    snippetRegistry.setUser([{ name, body: 'x', source: 'user' }])
+    expect(labels(`:${name}`)).toEqual([`:${name}`])
   })
 
   it('user snippets override built-ins and add new ones', () => {
@@ -138,6 +149,30 @@ describe('snippet completion in the editor', () => {
     expect(key(view, 'Tab')).toBe(true)
     expect(view.state.doc.toString()).not.toBe('abc')
     expect(indentWithTab.key).toBe('Tab')
+    view.destroy()
+  })
+
+  it('Tab accepts an open list even inside an active snippet field', async () => {
+    const view = mount(':mee')
+    startCompletion(view)
+    await open(view)
+    acceptCompletion(view)
+    expect(sel(view)).toBe('Kunde')
+    // Type a snippet trigger inside the field: list open + session active.
+    type(view, ' :tel')
+    startCompletion(view)
+    await open(view)
+    expect(key(view, 'Tab')).toBe(true)
+    expect(view.state.doc.toString()).not.toContain(':tel')
+    view.destroy()
+  })
+
+  it('Enter after a prose colon inserts a newline only', async () => {
+    const view = mount('Hinweis:')
+    expect(key(view, 'Enter')).toBe(true)
+    await tick()
+    expect(view.state.doc.toString()).toBe('Hinweis:\n')
+    expect(completionStatus(view.state)).toBeNull()
     view.destroy()
   })
 
