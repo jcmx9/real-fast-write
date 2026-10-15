@@ -58,7 +58,17 @@ function makeCx(state: EditorState, out: Range<Decoration>[]): PreviewCx {
     },
     hideOrFaint(from, to, reveal) {
       if (from >= to) return
-      out.push((reveal ? faint : hide).range(from, to))
+      if (!reveal && doc.lineAt(from).number === doc.lineAt(to).number) {
+        out.push(hide.range(from, to))
+        return
+      }
+      // Replace decorations from plugins must not span a line break: fade per line segment.
+      for (let pos = from; pos < to; ) {
+        const l = doc.lineAt(pos)
+        const end = Math.min(l.to, to)
+        if (end > pos) out.push(faint.range(pos, end))
+        pos = l.to + 1
+      }
     },
   }
 }
@@ -105,7 +115,7 @@ export function visitInline(cx: PreviewCx, ref: SyntaxNodeRef): boolean | undefi
     }
     return
   }
-  if (name === 'URL' && ref.node.parent?.name !== 'Link') {
+  if (name === 'URL' && ref.node.parent?.name !== 'Link' && ref.node.parent?.name !== 'Image') {
     cx.out.push(markDeco('rf-link').range(ref.from, ref.to))
     return
   }
@@ -124,7 +134,7 @@ export function visitInline(cx: PreviewCx, ref: SyntaxNodeRef): boolean | undefi
   return
 }
 
-/** Node handlers, in order; the first that returns a value other than undefined decides. */
+/** Node handlers; every handler sees every node. If any returns false, the node's children are skipped. */
 export const handlers: Array<(cx: PreviewCx, ref: SyntaxNodeRef) => boolean | undefined> = [
   visitInline,
 ]
@@ -136,16 +146,22 @@ export function buildPreview(
   const out: Range<Decoration>[] = []
   const cx = makeCx(state, out)
   const tree = syntaxTree(state)
+  // Visible ranges may overlap: handle each node once, replaying its verdict.
+  const seen = new Map<string, boolean>()
   for (const { from, to } of ranges) {
     tree.iterate({
       from,
       to,
       enter: (ref) => {
+        const key = `${ref.name}:${ref.from}:${ref.to}`
+        const prior = seen.get(key)
+        if (prior !== undefined) return prior ? undefined : false
+        let skip = false
         for (const h of handlers) {
-          const r = h(cx, ref)
-          if (r === false) return false
+          if (h(cx, ref) === false) skip = true
         }
-        return undefined
+        seen.set(key, !skip)
+        return skip ? false : undefined
       },
     })
   }
