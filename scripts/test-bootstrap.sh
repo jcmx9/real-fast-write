@@ -6,13 +6,15 @@
 # Default archive: dist/rf-write-<version>-mac-<arch>.zip (macOS) or
 # dist/rf-write-<version>-linux-x86_64.AppImage (Linux), as built by `npm run dist`.
 # Everything happens below a temp dir with its own HOME: the runner's (or developer's)
-# real ~/Applications, ~/.local/bin and ~/.local/share are never touched.
+# real ~/Applications, ~/.local/bin and ~/.local/share are never touched. The download
+# path runs against a fake `curl` that serves fixtures, so no network is needed.
 # On Linux without FUSE, run with APPIMAGE_EXTRACT_AND_RUN=1 (and a display, e.g. xvfb-run).
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 bootstrap="${root}/scripts/bootstrap.sh"
 version="$(node -p "require('${root}/package.json').version")"
+os="$(uname -s)"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -24,7 +26,7 @@ pass() {
 }
 
 default_archive() {
-  case "$(uname -s)" in
+  case "${os}" in
     Darwin)
       local arch
       arch="$(uname -m)"
@@ -32,7 +34,7 @@ default_archive() {
       echo "${root}/dist/rf-write-${version}-mac-${arch}.zip"
       ;;
     Linux) echo "${root}/dist/rf-write-${version}-linux-x86_64.AppImage" ;;
-    *) fail "unsupported OS $(uname -s)" ;;
+    *) fail "unsupported OS ${os}" ;;
   esac
 }
 
@@ -59,7 +61,7 @@ export RF_DOCUMENT="${work}/fake-rfd/rf-document"
 
 command_path="${HOME}/.local/bin/rf-write"
 desktop_path="${HOME}/.local/share/applications/rf-write.desktop"
-case "$(uname -s)" in
+case "${os}" in
   Darwin)
     install_dir="${RFW_HOME}/rf-write.app"
     # Outside the signed bundle; with RFW_HOME it sits next to the app.
@@ -70,24 +72,48 @@ case "$(uname -s)" in
     marker="${install_dir}/.rf-write-install"
     ;;
 esac
+old_dir="${install_dir}.old"
 
 run_bootstrap() {
   bash "${bootstrap}" "$@" </dev/null
 }
 
+with_archive() {
+  local file="$1"
+  shift
+  RFW_ARCHIVE="${file}" run_bootstrap "$@"
+}
+
+# Runs a command and checks its exit code and (optionally) a fixed string in its output.
+expect_code() {
+  local want="$1" pattern="$2" out code
+  shift 2
+  set +e
+  out="$("$@" 2>&1)"
+  code=$?
+  set -e
+  [[ "${code}" -eq "${want}" ]] || fail "'$*' exited ${code}, expected ${want}. Output: ${out}"
+  if [[ -n "${pattern}" ]] && ! grep -qF -- "${pattern}" <<<"${out}"; then
+    fail "'$*' output lacks '${pattern}'. Output: ${out}"
+  fi
+}
+
 assert_installed() {
   [[ -f "${marker}" ]] || fail "marker missing: ${marker}"
-  if [[ "$(uname -s)" == "Darwin" ]]; then
+  [[ -x "${command_path}" ]] || fail "command missing: ${command_path}"
+  grep -qF 'launch.log' "${command_path}" || fail "launcher does not log to launch.log"
+  if [[ "${os}" == "Darwin" ]]; then
     [[ "$(cat "${marker}")" == "${install_dir}" ]] || fail "marker does not name ${install_dir}"
     [[ -z "$(find "${install_dir}" -name '.rf-write-install')" ]] || fail "marker written into the app bundle"
     codesign --verify --deep --strict "${install_dir}" || fail "code seal of the installed app is broken"
-  fi
-  [[ -x "${command_path}" ]] || fail "command missing: ${command_path}"
-  if [[ "$(uname -s)" == "Linux" ]]; then
+  else
     [[ -x "${install_dir}/rf-write.AppImage" ]] || fail "AppImage missing"
     [[ -f "${desktop_path}" ]] || fail ".desktop entry missing"
     grep -q '^MimeType=text/markdown;$' "${desktop_path}" || fail ".desktop lacks MimeType"
     grep -q "^Exec=\"${install_dir}/rf-write.AppImage\" %F$" "${desktop_path}" || fail ".desktop Exec line"
+    if grep -q '^Icon=' "${desktop_path}"; then
+      [[ -f "${install_dir}/rf-write.png" ]] || fail ".desktop Icon without icon file"
+    fi
   fi
   local out
   out="$("${command_path}" --version)"
@@ -96,58 +122,106 @@ assert_installed() {
     fail "leftover staging/.old folders next to ${install_dir}"
 }
 
+# An install leftover (<install>.old) that the bootstrap must recognise as its own.
+make_owned_old() {
+  mkdir -p "${old_dir}"
+  if [[ "${os}" == "Darwin" ]]; then
+    mkdir -p "${old_dir}/Contents"
+    /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string io.github.jcmx9.rfwrite" \
+      "${old_dir}/Contents/Info.plist" >/dev/null
+  else
+    touch "${old_dir}/.rf-write-install"
+    printf '\177ELF' >"${old_dir}/rf-write.AppImage"
+  fi
+}
+
 # 1. Usage errors exit 2 and change nothing.
-set +e
-run_bootstrap --bogus >/dev/null 2>&1
-code=$?
-set -e
-[[ "${code}" -eq 2 ]] || fail "unknown option exited ${code}, expected 2"
-[[ ! -e "${install_dir}" ]] || fail "unknown option created ${install_dir}"
-pass "unknown option -> exit 2"
+expect_code 2 "unbekannte Option" run_bootstrap --bogus
+expect_code 2 "Ungültige Version" run_bootstrap --version 1.2
+expect_code 2 "Ungültige Version" run_bootstrap --version '26.10.0;x'
+expect_code 2 "schließen sich aus" run_bootstrap --pre --version 26.10.0
+[[ ! -e "${install_dir}" ]] || fail "usage errors created ${install_dir}"
+pass "usage errors (unknown option, bad --version, --pre with --version) -> exit 2"
 
 # 2. Fresh install from the local archive.
-RFW_ARCHIVE="${archive}" run_bootstrap
+with_archive "${archive}"
 assert_installed
 pass "install: marker, command, rf-write --version = ${version}"
 
-# 3. Update over an existing install.
-RFW_ARCHIVE="${archive}" run_bootstrap
+# 3. Update over an existing install, also with a trailing slash on RFW_HOME.
+with_archive "${archive}"
 assert_installed
-pass "update over existing install"
+RFW_HOME="${RFW_HOME}//" with_archive "${archive}"
+assert_installed
+pass "update over existing install (also RFW_HOME with trailing slash)"
 
 # 4. A broken archive aborts before anything is replaced; the old install keeps working.
 broken="${work}/broken-$(basename "${archive}")"
 printf 'not an archive' >"${broken}"
-set +e
-RFW_ARCHIVE="${broken}" run_bootstrap >/dev/null 2>&1
-code=$?
-set -e
-[[ "${code}" -ne 0 ]] || fail "broken archive was accepted"
+expect_code 6 "" with_archive "${broken}"
 assert_installed
-pass "broken archive -> exit ${code}, old install intact"
+pass "broken archive -> exit 6, old install intact"
 
-# 5. Download path against a fake GitHub: a stand-in `curl` first on PATH serves fixtures
-#    keyed by URL, so release selection and checksum checks run without network.
+# 5. Leftover .old: an own one is cleared on update, a foreign one stops the update.
+make_owned_old
+with_archive "${archive}"
+assert_installed
+mkdir -p "${old_dir}"
+echo keep >"${old_dir}/keep.txt"
+expect_code 1 "" with_archive "${archive}"
+[[ -f "${old_dir}/keep.txt" ]] || fail "update deleted a foreign .old"
+rm -rf "${old_dir}"
+assert_installed
+pass "leftover .old: own one removed on update, foreign one -> exit 1 and kept"
+
+# 6. Download path against a fake GitHub: a stand-in `curl` first on PATH serves fixtures
+#    keyed by URL (<key>, <key>.status, <key>.headers, <key>.offline).
 fake="${work}/fake-gh"
 mkdir -p "${fake}" "${work}/fakebin"
 cat >"${work}/fakebin/curl" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-out=""
-url=""
+out="" url="" headers="" wfmt="" fail_on_http=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -o) out="$2"; shift ;;
+    -D) headers="$2"; shift ;;
+    -w) wfmt="$2"; shift ;;
     -H | --proto | --retry) shift ;;
-    -*) ;;
+    --*) ;;
+    -*) [[ "$1" == *f* ]] && fail_on_http=1 ;;
     *) url="$1" ;;
   esac
   shift
 done
 echo "${url}" >>"${FAKE_GH}/requests.log"
-src="${FAKE_GH}/$(printf '%s' "${url}" | tr '/:?=&' '_____')"
-[[ -f "${src}" ]] || { echo "curl: (22) 404 ${url}" >&2; exit 22; }
-if [[ -n "${out}" ]]; then cp "${src}" "${out}"; else cat "${src}"; fi
+key="${FAKE_GH}/$(printf '%s' "${url}" | tr '/:?=&' '_____')"
+if [[ -f "${key}.offline" ]]; then
+  echo "curl: (6) Could not resolve host: api.github.com" >&2
+  exit 6
+fi
+status=200
+if [[ -f "${key}.status" ]]; then
+  status="$(cat "${key}.status")"
+elif [[ ! -e "${key}" ]]; then
+  status=404
+fi
+if [[ -n "${headers}" ]]; then
+  if [[ -f "${key}.headers" ]]; then cp "${key}.headers" "${headers}"; else printf 'HTTP/2 %s\r\n\r\n' "${status}" >"${headers}"; fi
+fi
+if [[ "${status}" -ge 400 && "${fail_on_http}" -eq 1 ]]; then
+  echo "curl: (22) The requested URL returned error: ${status}" >&2
+  exit 22
+fi
+body='{"message": "Not Found"}'
+if [[ -e "${key}" ]]; then
+  if [[ -n "${out}" ]]; then cp "${key}" "${out}"; else cat "${key}"; fi
+elif [[ -n "${out}" ]]; then
+  printf '%s' "${body}" >"${out}"
+else
+  printf '%s' "${body}"
+fi
+if [[ -n "${wfmt}" ]]; then printf '%s' "${status}"; fi
 EOF
 chmod +x "${work}/fakebin/curl"
 export FAKE_GH="${fake}"
@@ -159,16 +233,22 @@ fixture_path() {
   printf '%s/%s' "${fake}" "$(printf '%s' "$1" | tr '/:?=&' '_____')"
 }
 
-# Release JSON as GitHub returns it (subset): tag, flags and asset download URLs.
+# Release JSON as GitHub returns it (subset). order "std" = GitHub's field order,
+# "mixed" = prerelease first, tag_name last. The body holds an escaped key as a trap.
 release_json() {
-  local tag="$1" pre="$2"
-  printf '{"tag_name": "%s", "draft": false, "prerelease": %s, "body": "\\"prerelease\\": true", "assets": [' "${tag}" "${pre}"
-  printf '{"name": "rf-write-%s%s", "browser_download_url": "%s/%s/rf-write-%s%s"}, ' \
-    "${tag#v}" "${suffix}" "${download}" "${tag}" "${tag#v}" "${suffix}"
-  printf '{"name": "SHA256SUMS", "browser_download_url": "%s/%s/SHA256SUMS"}]}' "${download}" "${tag}"
+  local tag="$1" pre="$2" draft="$3" order="${4:-std}" assets
+  assets="$(printf '"assets": [{"name": "rf-write-%s%s", "browser_download_url": "%s/%s/rf-write-%s%s"}, {"name": "SHA256SUMS", "browser_download_url": "%s/%s/SHA256SUMS"}]' \
+    "${tag#v}" "${suffix}" "${download}" "${tag}" "${tag#v}" "${suffix}" "${download}" "${tag}")"
+  if [[ "${order}" == "std" ]]; then
+    printf '{"tag_name": "%s", "draft": %s, "prerelease": %s, "body": "\\"prerelease\\": true", %s}' \
+      "${tag}" "${draft}" "${pre}" "${assets}"
+  else
+    printf '{"prerelease":%s,"body":"\\"tag_name\\": \\"v0\\"",%s,"draft":%s,"tag_name":"%s"}' \
+      "${pre}" "${assets}" "${draft}" "${tag}"
+  fi
 }
 
-# Publishes asset + SHA256SUMS for a tag; a third argument overrides the hash.
+# Publishes asset + SHA256SUMS for a tag; a second argument overrides the hash.
 publish_assets() {
   local tag="$1" hash="${2:-}"
   local asset="rf-write-${tag#v}${suffix}"
@@ -181,105 +261,97 @@ run_online() {
   PATH="${work}/fakebin:${PATH}" run_bootstrap "$@"
 }
 
-release_json "v${version}" false >"$(fixture_path "${api}/latest")"
+latest="$(fixture_path "${api}/latest")"
+
+# API errors map to distinct codes and messages.
+expect_code 8 "--pre" run_online
+touch "${latest}.offline"
+expect_code 4 "offline" run_online
+rm "${latest}.offline"
+echo 403 >"${latest}.status"
+printf 'HTTP/2 403\r\nx-ratelimit-remaining: 0\r\nx-ratelimit-reset: 1700000000\r\n\r\n' >"${latest}.headers"
+expect_code 10 "Abfragelimit" run_online
+rm "${latest}.status" "${latest}.headers"
+expect_code 9 "gibt es nicht" run_online --version 0.0.2
+assert_installed
+pass "API errors: no stable release -> 8 (hint --pre), offline -> 4, rate limit -> 10, unknown version -> 9"
+
+release_json "v${version}" false false >"${latest}"
 publish_assets "v${version}"
-run_online
+run_online >/dev/null
 assert_installed
 grep -qxF "${api}/latest" "${fake}/requests.log" || fail "default channel did not ask /releases/latest"
 grep -qxF "${download}/v${version}/rf-write-${version}${suffix}" "${fake}/requests.log" || fail "wrong asset downloaded"
 pass "download: /releases/latest, checksum ok, installed"
 
-# --pre takes the newest pre-release, skipping a newer stable release listed first.
-{
-  printf '['
-  release_json "v99.0.0" false
-  printf ', '
-  release_json "v${version}" true
-  printf ']'
-} >"$(fixture_path "${api}?per_page=20")"
-publish_assets "v99.0.0"
-: >"${fake}/requests.log"
-run_online --pre
-assert_installed
-grep -qxF "${download}/v${version}/rf-write-${version}${suffix}" "${fake}/requests.log" || fail "--pre picked the wrong release"
-pass "--pre: newest pre-release chosen"
+# --pre takes the newest published pre-release: skips a draft and a newer stable release,
+# in GitHub's field order and in a mixed order.
+for order in std mixed; do
+  {
+    printf '['
+    release_json "v98.0.0-dev.1" true true "${order}"
+    printf ', '
+    release_json "v99.0.0" false false "${order}"
+    printf ', '
+    release_json "v${version}" true false "${order}"
+    printf ']'
+  } >"$(fixture_path "${api}?per_page=50")"
+  : >"${fake}/requests.log"
+  run_online --pre >/dev/null
+  assert_installed
+  grep -qxF "${download}/v${version}/rf-write-${version}${suffix}" "${fake}/requests.log" ||
+    fail "--pre picked the wrong release (${order} field order)"
+done
+pass "--pre: newest published pre-release chosen (draft and stable skipped, any field order)"
 
 # --version with a wrong checksum aborts with 5 and leaves the install alone.
-release_json "v0.0.1" false >"$(fixture_path "${api}/tags/v0.0.1")"
+release_json "v0.0.1" false false >"$(fixture_path "${api}/tags/v0.0.1")"
 publish_assets "v0.0.1" "0000000000000000000000000000000000000000000000000000000000000000"
-set +e
-run_online --version 0.0.1 >/dev/null 2>&1
-code=$?
-set -e
-[[ "${code}" -eq 5 ]] || fail "checksum mismatch exited ${code}, expected 5"
+expect_code 5 "Prüfsumme falsch" run_online --version 0.0.1
 assert_installed
 pass "--version with bad checksum -> exit 5, install intact"
 
-# An unknown version fails cleanly with 4.
-set +e
-run_online --version 0.0.2 >/dev/null 2>&1
-code=$?
-set -e
-[[ "${code}" -eq 4 ]] || fail "unknown version exited ${code}, expected 4"
-assert_installed
-pass "unknown --version -> exit 4"
-
-# 6. Uninstall removes command, menu entry and install folder; user data stays.
+# 7. Uninstall removes command, menu entry, install folder and an own leftover .old;
+#    user data stays.
+make_owned_old
 out="$(run_bootstrap --uninstall)"
 echo "${out}"
 [[ ! -e "${install_dir}" ]] || fail "install folder still there"
+[[ ! -e "${old_dir}" ]] || fail "leftover .old still there"
 [[ ! -e "${command_path}" ]] || fail "command still there"
 [[ ! -e "${desktop_path}" ]] || fail ".desktop entry still there"
 [[ ! -e "${marker}" ]] || fail "marker still there"
 [[ -x "${RF_DOCUMENT}" ]] || fail "rf-document was touched"
 grep -q 'rf-document' <<<"${out}" || fail "final message does not mention rf-document"
-pass "uninstall removed everything"
+pass "uninstall removed everything (incl. leftover .old)"
 
-# 7. A folder without the marker is never deleted or overwritten.
-if [[ "$(uname -s)" == "Darwin" ]]; then
+# 8. A folder without the marker is never deleted or overwritten.
+if [[ "${os}" == "Darwin" ]]; then
   mkdir -p "${install_dir}/Contents"
-  echo keep >"${install_dir}/Contents/keep.txt"
   keep="${install_dir}/Contents/keep.txt"
 else
   mkdir -p "${install_dir}"
-  echo keep >"${install_dir}/keep.txt"
   keep="${install_dir}/keep.txt"
 fi
-set +e
-run_bootstrap --uninstall >/dev/null 2>&1
-code=$?
-set -e
-[[ "${code}" -eq 1 ]] || fail "uninstall of unmarked folder exited ${code}, expected 1"
+echo keep >"${keep}"
+expect_code 1 "" run_bootstrap --uninstall
 [[ -f "${keep}" ]] || fail "uninstall deleted an unmarked folder"
-set +e
-RFW_ARCHIVE="${archive}" run_bootstrap >/dev/null 2>&1
-code=$?
-set -e
-[[ "${code}" -eq 1 ]] || fail "install over unmarked folder exited ${code}, expected 1"
+expect_code 1 "" with_archive "${archive}"
 [[ -f "${keep}" ]] || fail "install replaced an unmarked folder"
 pass "unmarked folder: uninstall and install refuse (exit 1), folder intact"
 
-# 8. macOS: a marker is not enough – an app with a different bundle ID is never deleted.
-if [[ "$(uname -s)" == "Darwin" ]]; then
-  rm -rf "${install_dir}"
-  mkdir -p "${install_dir}/Contents"
+# 9. A marker alone is not enough: macOS needs rf-write's bundle ID, Linux the AppImage.
+if [[ "${os}" == "Darwin" ]]; then
   /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string com.example.other" \
     "${install_dir}/Contents/Info.plist" >/dev/null
-  echo keep >"${keep}"
   printf '%s\n' "${install_dir}" >"${marker}"
-  set +e
-  run_bootstrap --uninstall >/dev/null 2>&1
-  code=$?
-  set -e
-  [[ "${code}" -eq 1 ]] || fail "uninstall of foreign bundle ID exited ${code}, expected 1"
-  [[ -f "${keep}" ]] || fail "uninstall deleted an app with a foreign bundle ID"
-  set +e
-  RFW_ARCHIVE="${archive}" run_bootstrap >/dev/null 2>&1
-  code=$?
-  set -e
-  [[ "${code}" -eq 1 ]] || fail "install over foreign bundle ID exited ${code}, expected 1"
-  [[ -f "${keep}" ]] || fail "install replaced an app with a foreign bundle ID"
-  pass "foreign bundle ID with marker: uninstall and install refuse (exit 1), app intact"
+else
+  touch "${marker}"
 fi
+expect_code 1 "" run_bootstrap --uninstall
+[[ -f "${keep}" ]] || fail "uninstall deleted a folder that only had a marker"
+expect_code 1 "" with_archive "${archive}"
+[[ -f "${keep}" ]] || fail "install replaced a folder that only had a marker"
+pass "marker without rf-write (foreign bundle ID / no AppImage): refuse (exit 1), folder intact"
 
 echo "All bootstrap checks passed."
