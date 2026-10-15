@@ -1,3 +1,4 @@
+import { isAbsolute } from 'node:path'
 import { BrowserWindow, dialog, ipcMain } from 'electron'
 import { Ch } from '../shared/ipc'
 import type { NoteFile, RenameResult, SaveResult, SessionPatch } from '../shared/types'
@@ -29,6 +30,27 @@ class SaveConflict extends Error {}
 export function registerIpc(ctx: AppContext): void {
   ipcMain.handle(Ch.startup, () => ctx.startup())
   ipcMain.handle(Ch.listSnippets, () => loadUserSnippets(ctx.settings.snippetFolder))
+  ipcMain.handle(Ch.settingsStatus, () => ctx.settingsStatus())
+  ipcMain.handle(Ch.updateSettings, (_e, patch: unknown) => ctx.updateSettings(patch))
+
+  /** Picker for the settings dialog; it only returns a path, nothing on disk is changed. */
+  ipcMain.handle(
+    Ch.choosePath,
+    async (e, kind: unknown, current: unknown): Promise<string | null> => {
+      if (kind !== 'folder' && kind !== 'file') throw new TypeError('Ungültiger Parameter.')
+      const win = BrowserWindow.fromWebContents(e.sender)
+      const start = typeof current === 'string' && isAbsolute(current) ? current : undefined
+      const options: Electron.OpenDialogOptions = {
+        properties: kind === 'folder' ? ['openDirectory', 'createDirectory'] : ['openFile'],
+        defaultPath: start,
+      }
+      const result = win
+        ? await dialog.showOpenDialog(win, options)
+        : await dialog.showOpenDialog(options)
+      const picked = result.canceled ? undefined : result.filePaths[0]
+      return picked ? canonicalPath(picked) : null
+    },
+  )
 
   /**
    * The app only leaves a fullscreen it requested itself (FullScreenOwner); returns whether

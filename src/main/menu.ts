@@ -103,6 +103,26 @@ export function buildMenuTemplate(d: MenuDeps): MenuItemConstructorOptions[] {
   })
   const sep: MenuItemConstructorOptions = { type: 'separator' }
 
+  const settings = item('settings', 'Einstellungen …', 'CmdOrCtrl+,')
+
+  // macOS: the standard app menu (Electron's appMenu role) with the settings item added.
+  const appMenu: MenuItemConstructorOptions = {
+    role: 'appMenu',
+    submenu: [
+      { role: 'about' },
+      sep,
+      settings,
+      sep,
+      { role: 'services' },
+      sep,
+      { role: 'hide' },
+      { role: 'hideOthers' },
+      { role: 'unhide' },
+      sep,
+      { role: 'quit' },
+    ],
+  }
+
   const recent: MenuItemConstructorOptions[] = d.recent.length
     ? [
         ...d.recent.map(
@@ -124,7 +144,9 @@ export function buildMenuTemplate(d: MenuDeps): MenuItemConstructorOptions[] {
       item('close-tab', 'Tab schließen', 'CmdOrCtrl+W'),
       sep,
       item('export', 'PDF exportieren', 'CmdOrCtrl+E'),
-      ...(mac ? [] : [sep, { role: 'quit', label: 'Beenden' } as MenuItemConstructorOptions]),
+      ...(mac
+        ? []
+        : [sep, settings, sep, { role: 'quit', label: 'Beenden' } as MenuItemConstructorOptions]),
     ],
   }
 
@@ -183,11 +205,5 @@ export function buildMenuTemplate(d: MenuDeps): MenuItemConstructorOptions[] {
     ],
   }
 
-  return [
-    ...(mac ? [{ role: 'appMenu' } as MenuItemConstructorOptions] : []),
-    file,
-    edit,
-    view,
-    window,
-  ]
+  return [...(mac ? [appMenu] : []), file, edit, view, window]
 }

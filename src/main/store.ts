@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs'
 import { dirname, isAbsolute, join } from 'node:path'
-import type { Session, SessionTab, Settings } from '../shared/types'
+import type { HeaderDefault, Session, SessionTab, Settings } from '../shared/types'
 import { writeFileAtomic } from './files'
 
 export const MAX_RECENT = 10
@@ -29,8 +29,15 @@ export function defaultSettings(documentsDir: string): Settings {
     snippetFolder: join(defaultFolder, 'snippets'),
     rfDocumentPath: '',
     presentFontFactor: 1.6,
+    headerDefault: 'yaml',
   }
 }
+
+export const FACTOR_MIN = 1
+export const FACTOR_MAX = 3
+
+const headerDefault = (v: unknown): HeaderDefault | null =>
+  v === 'yaml' || v === 'titleblock' ? v : null
 
 export function sanitizeSettings(raw: unknown, defaults: Settings): Settings {
   const o = isObj(raw) ? raw : {}
@@ -39,8 +46,40 @@ export function sanitizeSettings(raw: unknown, defaults: Settings): Settings {
     defaultFolder,
     snippetFolder: absPath(o.snippetFolder) ?? join(defaultFolder, 'snippets'),
     rfDocumentPath: absPath(o.rfDocumentPath) ?? '',
-    presentFontFactor: clamp(o.presentFontFactor, 1, 3, defaults.presentFontFactor),
+    presentFontFactor: clamp(
+      o.presentFontFactor,
+      FACTOR_MIN,
+      FACTOR_MAX,
+      defaults.presentFontFactor,
+    ),
+    headerDefault: headerDefault(o.headerDefault) ?? defaults.headerDefault,
   }
+}
+
+/**
+ * Applies a patch from the settings dialog. Unlike loading, nothing is clamped or derived:
+ * every invalid value is rejected and the current one kept, so bad input never persists.
+ */
+export function settingsPatch(current: Settings, raw: unknown): Settings {
+  const o = isObj(raw) ? raw : {}
+  const next = { ...current }
+  const folder = (key: 'defaultFolder' | 'snippetFolder') => {
+    const p = absPath(o[key])
+    if (p) next[key] = p
+  }
+  folder('defaultFolder')
+  folder('snippetFolder')
+  // Empty = locate automatically.
+  if (o.rfDocumentPath === '') next.rfDocumentPath = ''
+  else {
+    const p = absPath(o.rfDocumentPath)
+    if (p) next.rfDocumentPath = p
+  }
+  const f = o.presentFontFactor
+  if (typeof f === 'number' && Number.isFinite(f) && f >= FACTOR_MIN && f <= FACTOR_MAX)
+    next.presentFontFactor = f
+  next.headerDefault = headerDefault(o.headerDefault) ?? current.headerDefault
+  return next
 }
 
 export function sanitizeSession(raw: unknown): Session {

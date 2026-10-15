@@ -3,9 +3,11 @@ import { argsFromArgv, HELP_TEXT, parseCli } from './cli'
 import { AppContext } from './context'
 import { handleFontProtocol, registerFontScheme } from './font-protocol'
 import { registerIpc } from './ipc'
+import { userDataOverride } from './user-data'
 
 // Must run before requestSingleInstanceLock: the lock lives in userData.
-if (process.env.RFW_USER_DATA) app.setPath('userData', process.env.RFW_USER_DATA)
+const userData = userDataOverride(process.env, app.isPackaged, app.getPath('appData'))
+if (userData) app.setPath('userData', userData)
 registerFontScheme()
 
 const cli = parseCli(argsFromArgv(process.argv, app.isPackaged), process.cwd())

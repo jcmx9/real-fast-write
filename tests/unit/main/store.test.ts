@@ -9,6 +9,7 @@ import {
   sanitizeSession,
   sanitizeSettings,
   saveJson,
+  settingsPatch,
 } from '../../../src/main/store'
 
 const docs = resolve('/home/u/Documents')
@@ -21,7 +22,15 @@ describe('settings', () => {
       snippetFolder: join(docs, 'rf-write', 'snippets'),
       rfDocumentPath: '',
       presentFontFactor: 1.6,
+      headerDefault: 'yaml',
     })
+  })
+
+  it('keeps a known header default and drops an unknown one', () => {
+    expect(sanitizeSettings({ headerDefault: 'titleblock' }, defaults).headerDefault).toBe(
+      'titleblock',
+    )
+    expect(sanitizeSettings({ headerDefault: 'kaputt' }, defaults).headerDefault).toBe('yaml')
   })
 
   it('keeps valid values and derives the snippet folder from a custom default folder', () => {
@@ -42,6 +51,62 @@ describe('settings', () => {
       ),
     ).toEqual({ ...defaults, presentFontFactor: 3 })
     expect(sanitizeSettings('kaputt', defaults)).toEqual(defaults)
+  })
+})
+
+describe('settingsPatch', () => {
+  const current = defaults
+
+  it('applies valid values', () => {
+    const folder = resolve('/data/notes')
+    const snippets = resolve('/data/snippets')
+    const bin = resolve('/opt/rf/rf-document')
+    expect(
+      settingsPatch(current, {
+        defaultFolder: folder,
+        snippetFolder: snippets,
+        rfDocumentPath: bin,
+        presentFontFactor: 2.2,
+        headerDefault: 'titleblock',
+      }),
+    ).toEqual({
+      defaultFolder: folder,
+      snippetFolder: snippets,
+      rfDocumentPath: bin,
+      presentFontFactor: 2.2,
+      headerDefault: 'titleblock',
+    })
+  })
+
+  it('an empty rf-document path means automatic', () => {
+    const configured = { ...current, rfDocumentPath: resolve('/opt/rf/rf-document') }
+    expect(settingsPatch(configured, { rfDocumentPath: '' }).rfDocumentPath).toBe('')
+  })
+
+  it.each([
+    ['relative default folder', { defaultFolder: 'notizen' }],
+    ['empty default folder', { defaultFolder: '' }],
+    ['relative snippet folder', { snippetFolder: './s' }],
+    ['relative rf-document path', { rfDocumentPath: 'bin/rf-document' }],
+    ['non-string path', { defaultFolder: 42 }],
+    ['factor below range', { presentFontFactor: 0.9 }],
+    ['factor above range', { presentFontFactor: 3.1 }],
+    ['factor not a number', { presentFontFactor: '2' }],
+    ['factor NaN', { presentFontFactor: Number.NaN }],
+    ['unknown header default', { headerDefault: 'beides' }],
+  ])('rejects a %s and keeps the current value', (_name, patch) => {
+    expect(settingsPatch(current, patch)).toEqual(current)
+  })
+
+  it('ignores unknown keys and garbage', () => {
+    expect(settingsPatch(current, { evil: 1 })).toEqual(current)
+    expect(settingsPatch(current, null)).toEqual(current)
+    expect(settingsPatch(current, 'x')).toEqual(current)
+  })
+
+  it('accepts the range limits', () => {
+    expect(settingsPatch(current, { presentFontFactor: 1 }).presentFontFactor).toBe(1)
+    expect(settingsPatch(current, { presentFontFactor: 3 }).presentFontFactor).toBe(3)
   })
 })
 

@@ -10,14 +10,15 @@ import type {
   SessionPatch,
   SessionTab,
   Settings,
+  SettingsStatus,
   StartupState,
 } from '../shared/types'
 import { addRecent, replaceRecent } from './cli'
-import { runRfDocument } from './export'
+import { rfDocumentVersion, runRfDocument } from './export'
 import { canonicalPath, canonicalPaths, sameFile } from './files'
 import { fontDir, fontStatus } from './fonts'
 import { FullScreenOwner } from './fullscreen'
-import { isExecutableFile, locateRfDocument } from './locate'
+import { isExecutableFile, isRfDocumentBinary, locateRfDocument } from './locate'
 import { buildMenuTemplate, PresentKeyGuard } from './menu'
 import {
   DEFAULT_SESSION,
@@ -26,6 +27,7 @@ import {
   sanitizeSession,
   sanitizeSettings,
   saveJson,
+  settingsPatch,
 } from './store'
 import { NoteWatcher } from './watcher'
 import { createMainWindow } from './window'
@@ -58,6 +60,7 @@ export class AppContext {
   /** Keeps async canonicalisation from reordering openPaths/updateSession calls. */
   private openQueue: Promise<void> = Promise.resolve()
   private sessionQueue: Promise<void> = Promise.resolve()
+  private settingsQueue: Promise<unknown> = Promise.resolve()
   private rfDocument: string | null = null
 
   constructor(
@@ -265,6 +268,41 @@ export class AppContext {
     await this.persistSession()
   }
 
+  /**
+   * Validates a patch from the settings dialog, persists the result and applies it: the next
+   * export locates rf-document again, new notes go to the new default folder and the snippet
+   * list reads the new folder. Existing files are never moved or deleted. Rejected values
+   * keep the current ones; the dialog compares the result with its patch and says so.
+   */
+  updateSettings(patch: unknown): Promise<Settings> {
+    const run = this.settingsQueue.then(async () => {
+      const next = settingsPatch(this.settings, patch)
+      // main executes this path: a changed one must be an executable named rf-document.
+      if (
+        next.rfDocumentPath !== '' &&
+        next.rfDocumentPath !== this.settings.rfDocumentPath &&
+        !(await isRfDocumentBinary(next.rfDocumentPath))
+      )
+        next.rfDocumentPath = this.settings.rfDocumentPath
+      await saveJson(this.file('settings.json'), next)
+      if (next.rfDocumentPath !== this.settings.rfDocumentPath) this.rfDocument = null
+      this.settings = next
+      return next
+    })
+    this.settingsQueue = run.catch(() => undefined)
+    return run
+  }
+
+  /** Fresh lookup (not the export's cached one) plus `rf-document --version` and the fonts. */
+  async settingsStatus(): Promise<SettingsStatus> {
+    const [located, fonts] = await Promise.all([
+      locateRfDocument(this.locateOptions()),
+      fontStatus(this.fonts.dir),
+    ])
+    const version = located.found ? await rfDocumentVersion(located.found) : null
+    return { rfDocument: { path: located.found, version }, fonts }
+  }
+
   async exportPdf(note: string): Promise<ExportResult> {
     const located = await this.resolveRfDocument()
     if (!located.found) return { kind: 'not-found', searched: located.searched }
@@ -291,15 +329,19 @@ export class AppContext {
 
   private async resolveRfDocument(): Promise<{ found: string | null; searched: string[] }> {
     if (this.rfDocument) return { found: this.rfDocument, searched: [] }
-    const result = await locateRfDocument({
+    const result = await locateRfDocument(this.locateOptions())
+    this.rfDocument = result.found
+    return result
+  }
+
+  private locateOptions() {
+    return {
       platform: process.platform,
       env: process.env,
       home: homedir(),
       configured: this.settings.rfDocumentPath,
       isFile: isExecutableFile,
-    })
-    this.rfDocument = result.found
-    return result
+    }
   }
 
   private async setRecent(recent: string[]): Promise<void> {

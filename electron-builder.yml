@@ -1,0 +1,38 @@
+# Packaging for `npm run dist` (current OS only). Release flow: docs/github-release.md.
+appId: io.github.jcmx9.rfwrite
+productName: rf-write
+directories:
+  output: dist
+  buildResources: build
+# Only the electron-vite output ships; scripts/ (dev-only postinstall), tests/ and sources stay out.
+files:
+  - "out/**"
+  - "package.json"
+  - "!**/*.map"
+artifactName: "rf-write-${version}-${os}-${arch}.${ext}"
+mac:
+  target:
+    - target: zip
+      arch: [arm64, x64]
+  # Ad-hoc signature: unsigned in the MVP, but Apple Silicon refuses to run unsigned code.
+  identity: "-"
+  # electron-builder matches "-" against keychain identity names; the hook forces a true ad-hoc
+  # signature for the whole bundle on every machine.
+  sign: ./scripts/adhoc-sign.mjs
+  # Hardened runtime enforces library validation, and ad-hoc signatures carry no team ID, so the
+  # Electron Framework would fail to load ("different Team IDs"). It only matters for notarization.
+  hardenedRuntime: false
+  category: public.app-category.productivity
+win:
+  target:
+    - target: zip
+      arch: [x64]
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+  category: Office
+fileAssociations:
+  - ext: md
+    name: Markdown
+    role: Editor

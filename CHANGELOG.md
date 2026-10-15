@@ -16,6 +16,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Present recovers when the OS refuses fullscreen; fast toggles keep the last intent
 
 ### Added
+- Packaging with electron-builder and release archives for macOS, Windows and Linux
+- One-line install, update and uninstall (`scripts/bootstrap.sh`, `scripts/bootstrap.ps1`), also for pre-releases (`--pre` / `-Pre`)
+- Settings dialog (folders, rf-document path, Present font factor, header default) with rf-document and font status
+- Release script `scripts/release.sh dev|prod` and release workflow
 - Outline sidebar with H1/H2, folding in sync with the editor, per-mode visibility
 - Insert a page break (`<!-- pagebreak -->`) from the Edit menu or with Mod+Enter
 - Snippets: `:meeting`, `:telefonnotiz`, `:aufgabe`, `:header`, `:newpage` and own `*.tpl.md` templates, triggered with `:`

@@ -13,13 +13,73 @@
 
 ## Status
 
-In development. Available: tabs, autosave with atomic writes, rename, session restore, detection of external changes (including deleted or unreadable notes, never silently overwritten) and PDF export via rf-document, and the PDF look in the preview. Presentation mode (fullscreen, larger text, info line) and snippets are available. Not yet available: one-line installation.
+In development. Available: tabs, autosave with atomic writes, rename, session restore, detection of external changes (including deleted or unreadable notes, never silently overwritten) and PDF export via rf-document, and the PDF look in the preview. Presentation mode (fullscreen, larger text, info line) and snippets are available. One-line installation and update and the settings dialog are available.
 
 ## Prerequisites (development)
 
 - Node.js ≥ 22.12 (CI: 24)
 - npm, Git
 - for export: real-fast-document
+
+## Installation
+
+macOS and Linux:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jcmx9/real-fast-write/main/scripts/bootstrap.sh | bash
+```
+
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/jcmx9/real-fast-write/main/scripts/bootstrap.ps1 | iex
+```
+
+The script downloads the matching archive of the latest stable GitHub release, verifies it against `SHA256SUMS` and installs without admin rights. If rf-document is missing, it runs rf-document's own bootstrap.
+
+| System | Application | Command |
+|--------|-------------|---------|
+| macOS | `~/Applications/rf-write.app` | `~/.local/bin/rf-write` |
+| Linux | `~/.local/share/real-fast-write/app/` (extracted AppImage) and `~/.local/share/applications/rf-write.desktop` | `~/.local/bin/rf-write` |
+| Windows | `%LOCALAPPDATA%\real-fast-write\` and a Start-menu shortcut | `%LOCALAPPDATA%\Microsoft\WindowsApps\rf-write.cmd` (already on PATH) |
+
+The app is unsigned. On macOS it is ad-hoc signed and the script removes the quarantine flag, so Gatekeeper does not block it. On Windows, SmartScreen may warn. On Linux the script extracts the AppImage once, so `libfuse2` is not needed. On Ubuntu 24.04 and newer, AppArmor blocks the unprivileged user namespaces Electron's sandbox needs, and rf-write does not start; the script warns in that case and prints an AppArmor profile for rf-write only (creating it needs sudo). The launch log is at `~/.local/share/real-fast-write/launch.log`.
+
+## Update
+
+Run the install command again. The installed version is replaced; if the download fails, the old version stays unchanged. A specific version: `... | bash -s -- --version 26.10.0`, or `-Version 26.10.0` on Windows.
+
+## Uninstall
+
+macOS and Linux:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jcmx9/real-fast-write/main/scripts/bootstrap.sh | bash -s -- --uninstall
+```
+
+Windows (PowerShell):
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/jcmx9/real-fast-write/main/scripts/bootstrap.ps1))) -Uninstall
+```
+
+Only what the rf-write installation created is removed (recognised by its install marker). rf-document, settings and notes are left untouched.
+
+## Test version
+
+Pre-releases for testing; they may be older than the latest stable version:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jcmx9/real-fast-write/dev/scripts/bootstrap.sh | bash -s -- --pre
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/jcmx9/real-fast-write/dev/scripts/bootstrap.ps1))) -Pre
+```
+
+## Settings
+
+„Einstellungen …“ (macOS Cmd+, in the app menu, otherwise Ctrl+, in the „Datei“ menu) opens the dialog: default folder for new notes, snippet folder, path to rf-document (empty = locate automatically), font factor in presentation mode and the default for the YAML header in the preview (as YAML or as title block). A read-only status block shows whether rf-document and the fonts were found. Changing the default folder never moves or deletes files. As rf-document, only an executable file named `rf-document` (Windows `rf-document.cmd`/`.exe`) is accepted; rf-write names values it did not take after saving, and the previous value stays in effect for them.
 
 ## Usage
 
@@ -32,7 +92,7 @@ rf-write --help
 
 Symbolic links to single notes open the linked file (tab name, rename and export refer to it); linked folders are not affected.
 
-The `rf-write` command is available after installation (a one-line installer is planned); in development, `npm run dev` starts the app. Settings live in `settings.json` in the app data folder (macOS `~/Library/Application Support/rf-write`, Windows `%APPDATA%\rf-write`, Linux `~/.config/rf-write`).
+The `rf-write` command is available after installation; in development, `npm run dev` starts the app. Settings live in `settings.json` in the app data folder (macOS `~/Library/Application Support/rf-write`, Windows `%APPDATA%\rf-write`, Linux `~/.config/rf-write`); edit them under „Einstellungen …“ (macOS Cmd+, in the app menu, otherwise Ctrl+, in the „Datei“ menu).
 
 The preview uses rf-document's fonts from its install folder and otherwise falls back to system fonts. Body text is set justified without hyphenation, like the PDF from rf-document; Typst hyphenates only on export.
 
@@ -88,6 +148,8 @@ npm test                          # unit tests (Vitest)
 npx vitest run tests/unit/main/files.test.ts   # single test file
 npm run test:e2e                  # end-to-end (Playwright + Electron)
 ```
+
+In development (`npm run dev`) rf-write uses its own app data folder `rf-write-dev` next to `rf-write` (e.g. macOS `~/Library/Application Support/rf-write-dev`), so an installed app and the development build never share settings, session or the single-instance lock. `RFW_USER_DATA` (tests) overrides the folder.
 
 ## Project Structure
 

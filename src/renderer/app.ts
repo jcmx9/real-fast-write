@@ -9,6 +9,7 @@ import type {
   MenuCommand,
   Mode,
   NoteFile,
+  Settings,
   View,
 } from '../shared/types'
 import { AutosaveScheduler } from './editor/autosave'
@@ -27,11 +28,12 @@ import {
 } from './editor/setup'
 import { snippetRegistry } from './editor/snippets'
 import { type Tab, TabStore } from './tabs/tab-store'
-import { editTarget } from './ui/edit-target'
+import { allowedWithDialog, editTarget } from './ui/edit-target'
 import { InfoLine } from './ui/infoline'
 import { Notices } from './ui/notices'
 import { Outline } from './ui/outline'
 import { askText } from './ui/prompt'
+import { droppedFields, openSettings, STATUS_TIMEOUT_MS, withTimeout } from './ui/settings'
 import { type SaveState, StatusLine, saveText } from './ui/statusline'
 import { TabBar } from './ui/tabbar'
 import { editorSizes, handleZoomKey, zoomIn, zoomOut } from './ui/zoom'
@@ -81,6 +83,8 @@ export class App {
   private mode: Mode = 'edit'
   private zoom = { edit: 1, present: 1 }
   private presentFactor = 1.6
+  private settings: Settings | null = null
+  private settingsOpen = false
   /**
    * Serializes fullscreen requests so fast toggles reach main in order. Main owns the
    * fullscreen decision: it only leaves a fullscreen the app started (a user's own
@@ -195,6 +199,7 @@ export class App {
     this.view = startup.session.view
     this.zoom = { ...startup.session.zoom }
     this.outlineOn = { ...startup.session.outline }
+    this.settings = startup.settings
     this.presentFactor = startup.settings.presentFontFactor
     this.applyZoom()
     for (const t of startup.session.tabs) await this.openPath(t.path, t.headerHidden)
@@ -212,9 +217,11 @@ export class App {
   private async command(cmd: MenuCommand): Promise<void> {
     // While the window closes nothing may change a document, a path or the tab list.
     if (this.closing) return
+    // Behind a modal dialog only the edit commands run (they serve its text fields).
+    if (!allowedWithDialog(cmd, document.querySelector('dialog[open]') !== null)) return
     if (
       this.mode === 'present' &&
-      (cmd === 'export' || cmd === 'toggle-view' || cmd === 'toggle-header')
+      (cmd === 'export' || cmd === 'toggle-view' || cmd === 'toggle-header' || cmd === 'settings')
     ) {
       this.notices.toast('Im Präsentationsmodus nicht verfügbar – Esc beendet ihn.')
       return
@@ -279,7 +286,50 @@ export class App {
         return this.setZoom(1)
       case 'toggle-present':
         return this.presentToggle.toggle()
+      case 'settings':
+        return this.editSettings()
     }
+  }
+
+  private async editSettings(): Promise<void> {
+    const current = this.settings
+    if (!current || this.settingsOpen || document.querySelector('dialog[open]')) return
+    this.settingsOpen = true
+    try {
+      const patch = await openSettings({
+        settings: current,
+        status: withTimeout(this.rfw.getSettingsStatus(), STATUS_TIMEOUT_MS),
+        choose: (kind, path) => this.rfw.choosePath(kind, path),
+      })
+      if (!patch || Object.keys(patch).length === 0) return
+      const next = await this.rfw.updateSettings(patch)
+      this.settings = next
+      const dropped = droppedFields(patch, next)
+      if (dropped.length > 0)
+        this.notices.panel(
+          'Nicht alle Einstellungen übernommen',
+          `${dropped.join('\n')}\nFür diese Felder gilt weiter der bisherige Wert.`,
+        )
+      if (next.presentFontFactor !== this.presentFactor) {
+        this.presentFactor = next.presentFontFactor
+        this.applyZoom()
+        this.refresh()
+      }
+      if (next.snippetFolder !== current.snippetFolder) await this.reloadSnippets()
+    } catch (e) {
+      this.notices.panel(
+        'Einstellungen nicht gespeichert',
+        e instanceof Error ? e.message : String(e),
+      )
+    } finally {
+      this.settingsOpen = false
+      if (this.shownId !== null) this.editor.focus()
+    }
+  }
+
+  /** Header state of a tab opened without a session entry (Einstellungen → YAML-Header). */
+  private headerDefaultHidden(): boolean {
+    return this.settings?.headerDefault === 'titleblock'
   }
 
   /** Edit commands go to CodeMirror unless another text field (dialog, panel) has focus. */
@@ -349,12 +399,14 @@ export class App {
   private async newNote(): Promise<void> {
     if (this.closing) return
     const path = await this.rfw.newNotePath()
+    const hideHeader = this.headerDefaultHidden()
     this.store.add({
       path,
-      state: createState('', '\n', this.effectiveView(), false, this.mode),
+      state: createState('', '\n', this.effectiveView(), hideHeader, this.mode),
       bom: false,
       eol: '\n',
       onDisk: false,
+      headerHidden: hideHeader,
     })
     this.show()
   }
@@ -368,7 +420,8 @@ export class App {
     this.show()
   }
 
-  private async openPath(path: string, hideHeader = false): Promise<boolean> {
+  /** hideHeader: from the session entry; without one the header default applies. */
+  private async openPath(path: string, hideHeader = this.headerDefaultHidden()): Promise<boolean> {
     const open = this.store.findByPath(path)
     if (open) {
       this.store.activate(this.store.all.indexOf(open))

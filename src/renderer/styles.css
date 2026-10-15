@@ -307,6 +307,51 @@ dialog.prompt label {
   gap: 4px;
   margin-bottom: 8px;
 }
+dialog.prompt.settings {
+  width: min(560px, calc(100vw - 48px));
+}
+dialog.settings .settings-path {
+  display: flex;
+  gap: 6px;
+}
+dialog.settings .settings-path input {
+  flex: 1;
+  min-width: 0;
+}
+dialog.settings input[type="number"] {
+  width: 6em;
+}
+dialog.settings fieldset {
+  border: 0;
+  margin: 0 0 8px;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+dialog.settings legend {
+  padding: 0;
+  margin-bottom: 4px;
+}
+dialog.settings label.settings-radio {
+  display: inline-flex;
+  align-items: center;
+  margin: 0;
+}
+dialog.settings .settings-status {
+  color: var(--chrome-muted);
+  user-select: text;
+  overflow-wrap: anywhere;
+  margin-bottom: 8px;
+}
+dialog.settings h3 {
+  font-size: 12px;
+  margin: 8px 0 4px;
+}
+dialog.settings .settings-error {
+  color: var(--danger);
+  margin: 0 0 8px;
+}
 
 /* Snippet completion: calm, flat, chrome font (rem, so Present's body zoom does not scale it). */
 .cm-tooltip.cm-tooltip-autocomplete {
