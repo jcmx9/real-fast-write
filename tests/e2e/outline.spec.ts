@@ -75,17 +75,19 @@ test('visibility is remembered per mode and across restarts', async () => {
   await clickMenu(app, 'toggle-outline')
   await expect(outline(page)).toBeVisible()
   await shot(page, 'outline-present')
+  await clickMenu(app, 'toggle-outline')
+  await expect(outline(page)).toBeHidden()
   await clickMenu(app, 'toggle-present')
   await expect(page.locator('body.rf-mode-present')).toHaveCount(0)
   await expect(outline(page)).toBeVisible()
-  await sessionHas(userData, true, true)
+  await sessionHas(userData, true, false)
   await app.close()
 
   const second = await launch({ dirs, args: [note] })
   await expect(outline(second.page)).toBeVisible()
   await clickMenu(second.app, 'toggle-present')
   await expect(second.page.locator('body.rf-mode-present')).toHaveCount(1)
-  await expect(outline(second.page)).toBeVisible()
+  await expect(outline(second.page)).toBeHidden()
   await second.app.close()
 })
 
@@ -106,12 +108,34 @@ test('chevron folds text and outline in sync; unfold-all and fold-all follow', a
   await expect(chevrons(page).first()).toHaveAttribute('aria-expanded', 'true')
 
   await clickMenu(app, 'fold-all')
-  await expect(page.locator('.cm-foldPlaceholder').first()).toBeVisible()
+  // Only the two H1 folds are visible; the H2 folds sit inside them.
+  await expect(page.locator('.cm-foldPlaceholder')).toHaveCount(2)
   const states = await chevrons(page).evaluateAll((els) =>
     els.map((el) => el.getAttribute('aria-expanded')),
   )
   expect(states.length).toBeGreaterThan(0)
   expect(states.every((s) => s === 'false')).toBe(true)
+  await app.close()
+})
+
+test('typing below a folded section keeps it folded; the chevron opens it in one click', async () => {
+  const { app, page } = await openNote()
+  await clickMenu(app, 'toggle-outline')
+  await expect(labels(page)).toHaveCount(5)
+  await chevrons(page).nth(3).click() // Beta (Alpha, Alpha eins, Alpha zwei come first)
+  await expect(page.locator('.cm-foldPlaceholder')).toHaveCount(1)
+  await expect(labels(page)).toHaveCount(4)
+  await page.locator('.cm-content').click()
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+End' : 'Control+End')
+  // The note ends with a newline: the text continues the last paragraph of Beta's section.
+  await page.keyboard.type('Neu unten.')
+  await expect(page.locator('.cm-foldPlaceholder')).toHaveCount(1)
+  await expect(labels(page)).toHaveCount(4)
+  await expect(chevrons(page).nth(3)).toHaveAttribute('aria-expanded', 'false')
+  await chevrons(page).nth(3).click()
+  await expect(page.locator('.cm-foldPlaceholder')).toHaveCount(0)
+  await expect(chevrons(page).nth(3)).toHaveAttribute('aria-expanded', 'true')
+  await expect(labels(page)).toHaveCount(5)
   await app.close()
 })
 
@@ -149,5 +173,44 @@ test('a long heading stays one line with the full text as title', async () => {
     win: window.innerWidth,
   }))
   expect(widths.bar).toBeLessThanOrEqual(widths.win * 0.33 + 1)
+  await app.close()
+})
+
+test('short headings get the minimum width of 14em', async () => {
+  const { app, page } = await openNote('# A\n\nText.\n\n# B\n\nText.\n')
+  await clickMenu(app, 'toggle-outline')
+  await expect(labels(page)).toHaveCount(2)
+  const { bar, em } = await page.evaluate(() => {
+    const el = document.querySelector('#outline') as HTMLElement
+    return { bar: el.offsetWidth, em: Number.parseFloat(getComputedStyle(el).fontSize) }
+  })
+  expect(bar).toBeGreaterThanOrEqual(14 * em - 1)
+  await app.close()
+})
+
+test('a classic scrollbar does not cut a medium heading short', async () => {
+  const medium = 'Mittellange Überschrift Nr. 1'.padEnd(40, 'x')
+  const body = Array.from({ length: 80 }, (_, i) => `# Kurz ${i}\n\nText.\n`).join('\n')
+  const { app, page } = await openNote(`# ${medium}\n\nText.\n\n${body}`)
+  // Force a non-overlay scrollbar as on Windows/Linux (CSSOM rule, not blocked by the CSP).
+  await page.evaluate(() => {
+    const sheet = document.styleSheets[0] as CSSStyleSheet
+    sheet.insertRule('#outline::-webkit-scrollbar { width: 15px; }', sheet.cssRules.length)
+  })
+  await clickMenu(app, 'toggle-outline')
+  await expect(labels(page)).toHaveCount(81)
+  const m = await page.evaluate(() => {
+    const el = document.querySelector('#outline') as HTMLElement
+    const label = el.querySelector('.rf-ol-label') as HTMLElement
+    return {
+      scrollbar: el.offsetWidth - el.clientWidth - 2,
+      overflows: label.scrollWidth > label.clientWidth,
+      bar: el.offsetWidth,
+      win: window.innerWidth,
+    }
+  })
+  expect(m.scrollbar).toBeGreaterThan(0)
+  expect(m.overflows).toBe(false)
+  expect(m.bar).toBeLessThanOrEqual(m.win * 0.33 + 1)
   await app.close()
 })
