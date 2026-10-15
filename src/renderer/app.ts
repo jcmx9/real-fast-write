@@ -7,6 +7,7 @@ import type { ExportResult, MenuCommand, Mode, NoteFile, View } from '../shared/
 import { AutosaveScheduler } from './editor/autosave'
 import { headerHidden, headerToggleSpec, moveOutOfHeader } from './editor/header'
 import { modeCompartment, modeExtensions } from './editor/mode'
+import { jumpToEntry, OutlineSync, toggleEntryFold } from './editor/outline-actions'
 import { insertPageBreak } from './editor/pagebreak'
 import { foldAllSections } from './editor/sections'
 import { createState, serializeDoc, viewCompartment, viewExtensions } from './editor/setup'
@@ -15,6 +16,7 @@ import { type Tab, TabStore } from './tabs/tab-store'
 import { editTarget } from './ui/edit-target'
 import { InfoLine } from './ui/infoline'
 import { Notices } from './ui/notices'
+import { Outline } from './ui/outline'
 import { askText } from './ui/prompt'
 import { SAVE_STATE_LABEL, type SaveState, StatusLine } from './ui/statusline'
 import { TabBar } from './ui/tabbar'
@@ -42,6 +44,7 @@ export interface AppRoot {
   empty: HTMLElement
   status: HTMLElement
   infoline: HTMLElement
+  outline: HTMLElement
   notices: HTMLElement
 }
 
@@ -54,6 +57,9 @@ export class App {
   private readonly status: StatusLine
   private readonly notices: Notices
   private readonly infoLine: InfoLine
+  private readonly outline: OutlineSync
+  /** Outline sidebar on/off per mode (persisted in the session). */
+  private outlineOn = { edit: false, present: false }
   private view: View = 'preview'
   private mode: Mode = 'edit'
   private zoom = { edit: 1, present: 1 }
@@ -80,6 +86,7 @@ export class App {
         const tab = this.shownId === null ? undefined : this.store.get(this.shownId)
         if (!tab) return
         this.store.updateState(tab.id, view.state)
+        this.outline.update(trs)
         if (trs.some((tr) => tr.docChanged)) {
           this.autosave.touch()
           this.refresh()
@@ -98,6 +105,13 @@ export class App {
       zoomIn: () => this.setZoom(zoomIn(this.zoom[this.mode])),
       zoomOut: () => this.setZoom(zoomOut(this.zoom[this.mode])),
     })
+    this.outline = new OutlineSync(
+      new Outline(root.outline, {
+        jump: (e) => jumpToEntry(this.editor, e),
+        toggle: (e) => toggleEntryFold(this.editor, e),
+      }),
+      () => (this.shownId === null ? null : this.editor.state),
+    )
     this.rfw.onFullScreenLeft(() => {
       if (this.mode === 'present') void this.exitPresent(false)
     })
@@ -134,6 +148,7 @@ export class App {
     }
     this.view = startup.session.view
     this.zoom = { ...startup.session.zoom }
+    this.outlineOn = { ...startup.session.outline }
     this.presentFactor = startup.settings.presentFontFactor
     this.applyZoom()
     for (const t of startup.session.tabs) await this.openPath(t.path, t.headerHidden)
@@ -190,6 +205,8 @@ export class App {
         return this.setView(this.view === 'code' ? 'preview' : 'code')
       case 'toggle-header':
         return this.toggleHeader()
+      case 'toggle-outline':
+        return this.toggleOutline()
       case 'fold':
         foldCode(this.editor)
         this.editor.focus()
@@ -336,6 +353,7 @@ export class App {
     if (view === this.view) return
     this.view = view
     this.reconfigureAll()
+    this.outline.refresh()
     this.syncMain()
     this.editor.focus()
   }
@@ -367,6 +385,7 @@ export class App {
     this.root.infoline.hidden = false
     this.infoLine.start()
     this.applyZoom()
+    this.applyOutline()
     this.refresh()
     this.editor.focus()
     await this.fullScreenOps.run(async () => {
@@ -390,6 +409,7 @@ export class App {
     this.root.infoline.hidden = true
     this.infoLine.stop()
     this.applyZoom()
+    this.applyOutline()
     this.refresh()
     this.editor.focus()
     await this.fullScreenOps.run(async () => {
@@ -415,6 +435,22 @@ export class App {
     tab.headerHidden = hide
     this.syncMain()
     this.editor.focus()
+  }
+
+  /** Outline on/off for the current mode; allowed in Present too. */
+  private toggleOutline(): void {
+    this.outlineOn[this.mode] = !this.outlineOn[this.mode]
+    this.applyOutline()
+    this.rfw
+      .saveSession({ outline: { ...this.outlineOn } })
+      .catch((e: unknown) => console.error('saveSession(outline) failed', e))
+    this.editor.focus()
+  }
+
+  /** Shown when enabled for the current mode and a tab is shown. */
+  private applyOutline(): void {
+    this.outline.setVisible(this.outlineOn[this.mode] && this.shownId !== null)
+    this.outline.refresh()
   }
 
   private async closeTab(id: number): Promise<void> {
@@ -638,7 +674,10 @@ export class App {
     tab.eol = note.eol
     this.store.updateState(tab.id, state)
     this.store.markSaved(tab.id, state.doc)
-    if (this.shownId === tab.id) this.editor.setState(state)
+    if (this.shownId === tab.id) {
+      this.editor.setState(state)
+      this.outline.invalidate()
+    }
     this.refresh()
   }
 
@@ -654,8 +693,10 @@ export class App {
       if (this.shownId !== null) closeCompletion(this.editor)
       this.editor.setState(tab.state)
       this.editor.focus()
+      this.outline.invalidate()
     }
     this.shownId = tab?.id ?? null
+    this.applyOutline()
     this.refresh()
     this.syncMain()
   }
@@ -700,6 +741,12 @@ export class App {
       0,
       tabs.findIndex((t) => t.path === activePath),
     )
-    await this.rfw.saveSession({ tabs, activeIndex, view: this.view, zoom: this.zoom })
+    await this.rfw.saveSession({
+      tabs,
+      activeIndex,
+      view: this.view,
+      zoom: this.zoom,
+      outline: { ...this.outlineOn },
+    })
   }
 }

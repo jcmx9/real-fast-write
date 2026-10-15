@@ -33,10 +33,14 @@ export interface Session {
   mode: Mode
   view: View
   zoom: { edit: number; present: number }
+  /** Outline sidebar on/off per mode. */
+  outline: { edit: boolean; present: boolean }
   recent: string[]
 }
 
-export type SessionPatch = Partial<Pick<Session, 'tabs' | 'activeIndex' | 'mode' | 'view' | 'zoom'>>
+export type SessionPatch = Partial<
+  Pick<Session, 'tabs' | 'activeIndex' | 'mode' | 'view' | 'zoom' | 'outline'>
+>
 
 export interface FontStatus {
   dir: string
@@ -73,6 +77,7 @@ export type MenuCommand =
   | 'toggle-present'
   | 'toggle-view'
   | 'toggle-header'
+  | 'toggle-outline'
   | 'fold'
   | 'unfold'
   | 'fold-all'

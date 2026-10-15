@@ -17,6 +17,7 @@ const app = new App({
   empty: byId('empty'),
   status: byId('status'),
   infoline: byId('infoline'),
+  outline: byId('outline'),
   notices: byId('notices'),
 })
 void app.start()
