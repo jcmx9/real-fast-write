@@ -1,3 +1,4 @@
+import { closeCompletion } from '@codemirror/autocomplete'
 import { redo, selectAll, undo } from '@codemirror/commands'
 import { foldCode, unfoldAll, unfoldCode } from '@codemirror/language'
 import type { EditorState, TransactionSpec } from '@codemirror/state'
@@ -639,6 +640,9 @@ export class App {
     this.root.empty.hidden = tab !== null
     this.root.editor.hidden = tab === null
     if (tab && tab.id !== this.shownId) {
+      // Close an open snippet list in the tab being left (routed to shownId), so it does not
+      // reappear there later and a stray Enter inserts a snippet typed long ago.
+      if (this.shownId !== null) closeCompletion(this.editor)
       this.editor.setState(tab.state)
       this.editor.focus()
     }
