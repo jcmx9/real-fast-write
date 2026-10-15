@@ -3,7 +3,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { applyAppName, plutilArgs } from '../../../scripts/dev-app-name.mjs'
+import { applyAppName, codesignArgs, plutilArgs } from '../../../scripts/dev-app-name.mjs'
 
 describe('plutilArgs', () => {
   it('replaces CFBundleName and CFBundleDisplayName', () => {
@@ -11,6 +11,12 @@ describe('plutilArgs', () => {
       ['-replace', 'CFBundleName', '-string', 'rf-write', '/x/Info.plist'],
       ['-replace', 'CFBundleDisplayName', '-string', 'rf-write', '/x/Info.plist'],
     ])
+  })
+})
+
+describe('codesignArgs', () => {
+  it('re-signs the bundle ad hoc, since the Info.plist hash is part of the signature', () => {
+    expect(codesignArgs('/x/Electron.app')).toEqual(['--force', '--sign', '-', '/x/Electron.app'])
   })
 })
 
