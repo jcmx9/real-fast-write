@@ -18,7 +18,7 @@ import { canonicalPath, canonicalPaths } from './files'
 import { fontDir, fontStatus } from './fonts'
 import { FullScreenOwner } from './fullscreen'
 import { isExecutableFile, locateRfDocument } from './locate'
-import { buildMenuTemplate } from './menu'
+import { buildMenuTemplate, PresentKeyGuard } from './menu'
 import {
   DEFAULT_SESSION,
   defaultSettings,
@@ -38,6 +38,8 @@ export class AppContext {
   window: BrowserWindow | null = null
   /** Whether the app owns the window's fullscreen; reset with every new window. */
   fullScreen = new FullScreenOwner()
+  /** Tells a held Present shortcut's auto-repeats from deliberate presses (menu.ts). */
+  private readonly presentKey = new PresentKeyGuard(process.platform === 'darwin')
   settings: Settings
   session: Session = DEFAULT_SESSION
   fonts: FontStatus = { dir: '', found: false, missing: [] }
@@ -101,6 +103,7 @@ export class AppContext {
       e.preventDefault()
       this.send(Ch.beforeClose)
     })
+    win.webContents.on('before-input-event', (_e, input) => this.presentKey.onInput(input))
     win.webContents.on('did-start-loading', () => {
       this.rendererReady = false
     })
@@ -201,6 +204,7 @@ export class AppContext {
       command: (c: MenuCommand) => this.send(Ch.menu, c),
       openRecent: (p) => void this.openPaths([p]).catch(() => undefined),
       clearRecent: () => void this.setRecent([]).catch(logSessionError),
+      presentKey: this.presentKey,
     })
     Menu.setApplicationMenu(Menu.buildFromTemplate(template))
   }

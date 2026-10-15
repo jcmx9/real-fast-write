@@ -10,17 +10,71 @@ export interface MenuDeps {
   clearRecent(): void
   /** Clock for the held-shortcut guard (tests); defaults to Date.now. */
   now?: () => number
+  /** Auto-repeat guard fed by the window's before-input-event; a fresh one otherwise. */
+  presentKey?: PresentKeyGuard
 }
 
 /**
- * Accelerator events closer than this belong to one held shortcut. Electron's menu click
- * carries no auto-repeat flag, so time is the only signal. Once auto-repeat runs it fires
- * every ~30–50 ms, which this window swallows; the OS's initial repeat delay is at least
- * 250 ms by default on macOS, Windows and Linux, so two deliberate presses more than 250 ms
- * apart both toggle. Limit: the first repeat after that initial delay is indistinguishable
- * from a second press and toggles too.
+ * Fallback only: accelerator clicks closer than this belong to one held shortcut, used when no
+ * matching key input was observed (see PresentKeyGuard). OS auto-repeat fires every ~30–50 ms
+ * once running and its initial delay is at least 250 ms by default on macOS, Windows and
+ * Linux, so two deliberate presses more than 250 ms apart both toggle.
  */
 const KEY_REPEAT_MS = 250
+/** A matching keyDown is used for the accelerator click that follows it within this time. */
+const INPUT_FRESH_MS = 500
+
+/** The fields of Electron's before-input-event `Input` the guard reads. */
+export interface KeyInput {
+  type: string
+  key: string
+  isAutoRepeat: boolean
+  shift: boolean
+  control: boolean
+  alt: boolean
+  meta: boolean
+}
+
+/**
+ * Decides whether an accelerator click of toggle-present comes from an OS auto-repeat of a
+ * held Cmd/Ctrl+Shift+P: a held shortcut must toggle Present exactly once.
+ *
+ * Electron's menu click carries no repeat flag, but the window's webContents emits
+ * 'before-input-event' with `isAutoRepeat` before menu shortcuts are dispatched (Electron
+ * docs: preventDefault there "will prevent ... the menu shortcuts"; this also covers macOS key
+ * equivalents, which Chromium offers to the page before the main menu). A native probe was not
+ * possible on the dev machine (synthetic OS keystrokes need accessibility rights), so the
+ * timing window stays as a fallback for clicks without a matching, fresh keyDown (e.g. focus
+ * outside the page). Manual check on macOS and Windows: PR checklist.
+ */
+export class PresentKeyGuard {
+  /** The latest matching keyDown not yet consumed by a click. */
+  private seen: { repeat: boolean; at: number } | null = null
+  private lastClick = Number.NEGATIVE_INFINITY
+
+  constructor(
+    private readonly mac: boolean,
+    private readonly now: () => number = Date.now,
+  ) {}
+
+  /** Feed every before-input-event. A keyUp needs no handling: a new press is not a repeat. */
+  onInput(i: KeyInput): void {
+    if (i.type !== 'keyDown' || i.key.toLowerCase() !== 'p' || !i.shift || i.alt) return
+    if (this.mac ? !i.meta : !i.control) return
+    this.seen = { repeat: i.isAutoRepeat, at: this.now() }
+  }
+
+  /** For an accelerator-triggered toggle-present click: true = ignore it (auto-repeat). */
+  ignoreClick(): boolean {
+    const t = this.now()
+    const seen = this.seen
+    this.seen = null
+    const previous = this.lastClick
+    this.lastClick = t
+    if (seen && t - seen.at < INPUT_FRESH_MS) return seen.repeat
+    return t - previous < KEY_REPEAT_MS
+  }
+}
 
 /** Electron passes this as the click handler's third argument. */
 interface ClickEvent {
@@ -29,16 +83,9 @@ interface ClickEvent {
 
 export function buildMenuTemplate(d: MenuDeps): MenuItemConstructorOptions[] {
   const mac = d.platform === 'darwin'
-  const now = d.now ?? Date.now
-  // A held Cmd/Ctrl+Shift+P repeats; its fast repeat stream must not flap Present.
-  let lastPresentKey = Number.NEGATIVE_INFINITY
-  const heldRepeat = (id: MenuCommand, event: ClickEvent | undefined): boolean => {
-    if (id !== 'toggle-present' || !event?.triggeredByAccelerator) return false
-    const t = now()
-    const repeat = t - lastPresentKey < KEY_REPEAT_MS
-    lastPresentKey = t
-    return repeat
-  }
+  const presentKey = d.presentKey ?? new PresentKeyGuard(mac, d.now)
+  const heldRepeat = (id: MenuCommand, event: ClickEvent | undefined): boolean =>
+    id === 'toggle-present' && event?.triggeredByAccelerator === true && presentKey.ignoreClick()
   const item = (
     id: MenuCommand,
     label: string,
