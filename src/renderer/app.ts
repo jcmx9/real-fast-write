@@ -1,3 +1,4 @@
+import { closeCompletion } from '@codemirror/autocomplete'
 import { redo, selectAll, undo } from '@codemirror/commands'
 import { foldCode, unfoldAll, unfoldCode } from '@codemirror/language'
 import type { EditorState, TransactionSpec } from '@codemirror/state'
@@ -6,9 +7,12 @@ import type { ExportResult, MenuCommand, Mode, NoteFile, View } from '../shared/
 import { AutosaveScheduler } from './editor/autosave'
 import { headerHidden, headerToggleSpec, moveOutOfHeader } from './editor/header'
 import { modeCompartment, modeExtensions } from './editor/mode'
+import { insertPageBreak } from './editor/pagebreak'
 import { foldAllSections } from './editor/sections'
 import { createState, serializeDoc, viewCompartment, viewExtensions } from './editor/setup'
+import { snippetRegistry } from './editor/snippets'
 import { type Tab, TabStore } from './tabs/tab-store'
+import { editTarget } from './ui/edit-target'
 import { InfoLine } from './ui/infoline'
 import { Notices } from './ui/notices'
 import { askText } from './ui/prompt'
@@ -109,6 +113,15 @@ export class App {
     this.rfw.onBeforeClose(() => this.beforeClose())
     window.addEventListener('keydown', (e) => this.globalKeys(e))
     window.addEventListener('blur', () => void this.autosave.flush())
+    window.addEventListener('focus', () => void this.reloadSnippets())
+  }
+
+  private async reloadSnippets(): Promise<void> {
+    try {
+      snippetRegistry.setUser(await this.rfw.listSnippets())
+    } catch (err) {
+      console.error('rf-write: Snippets konnten nicht geladen werden', err)
+    }
   }
 
   async start(): Promise<void> {
@@ -130,6 +143,7 @@ export class App {
     for (const p of startup.openPaths) await this.openPath(p)
     if (this.store.all.length === 0) await this.newNote()
     else this.show()
+    void this.reloadSnippets()
   }
 
   // ── commands ────────────────────────────────────────────────────────────
@@ -170,6 +184,8 @@ export class App {
         return this.editCommand('redo', redo)
       case 'select-all':
         return this.editCommand('selectAll', selectAll)
+      case 'insert-pagebreak':
+        return this.editCommand('insertPageBreak', insertPageBreak)
       case 'toggle-view':
         return this.setView(this.view === 'code' ? 'preview' : 'code')
       case 'toggle-header':
@@ -204,14 +220,19 @@ export class App {
   }
 
   /** Edit commands go to CodeMirror unless another text field (dialog, panel) has focus. */
-  private editCommand(name: 'undo' | 'redo' | 'selectAll', run: (v: EditorView) => unknown): void {
-    const el = document.activeElement
-    const textField =
-      el instanceof HTMLInputElement ||
-      el instanceof HTMLTextAreaElement ||
-      (el instanceof HTMLElement && el.isContentEditable && !this.editor.dom.contains(el))
-    if (textField) {
-      document.execCommand(name)
+  private editCommand(
+    name: 'undo' | 'redo' | 'selectAll' | 'insertPageBreak',
+    run: (v: EditorView) => unknown,
+  ): void {
+    const target = editTarget(
+      document.activeElement,
+      this.editor.dom,
+      document.querySelector('dialog[open]') !== null,
+    )
+    if (target === 'blocked') return
+    if (target === 'field') {
+      // A page break only makes sense in the document; other fields ignore the shortcut.
+      if (name !== 'insertPageBreak') document.execCommand(name)
       return
     }
     run(this.editor)
@@ -628,6 +649,9 @@ export class App {
     this.root.empty.hidden = tab !== null
     this.root.editor.hidden = tab === null
     if (tab && tab.id !== this.shownId) {
+      // Close an open snippet list in the tab being left (routed to shownId), so it does not
+      // reappear there later and a stray Enter inserts a snippet typed long ago.
+      if (this.shownId !== null) closeCompletion(this.editor)
       this.editor.setState(tab.state)
       this.editor.focus()
     }

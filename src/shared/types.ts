@@ -69,6 +69,7 @@ export type MenuCommand =
   | 'undo'
   | 'redo'
   | 'select-all'
+  | 'insert-pagebreak'
   | 'toggle-present'
   | 'toggle-view'
   | 'toggle-header'
@@ -100,4 +101,11 @@ export interface RfwApi {
   /** Resolves to whether the user (not the app) had the window fullscreen before the change. */
   setFullScreen(on: boolean): Promise<boolean>
   onFullScreenLeft(cb: () => void): void
+  listSnippets(): Promise<SnippetDef[]>
+}
+
+export interface SnippetDef {
+  name: string
+  body: string
+  source: 'builtin' | 'user'
 }

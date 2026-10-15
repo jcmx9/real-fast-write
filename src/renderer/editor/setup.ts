@@ -9,8 +9,10 @@ import { Frontmatter, frontmatterRange } from './frontmatter'
 import { headerFold, headerHidden } from './header'
 import { rfHighlight } from './highlight'
 import { modeCompartment, modeExtensions } from './mode'
+import { pageBreakKeymap } from './pagebreak'
 import { previewPlugin } from './preview'
-import { foldAllSections } from './sections'
+import { foldAllSections, unfoldOnCursor } from './sections'
+import { snippetExtensions } from './snippets'
 import { tableField } from './tables'
 
 export const viewCompartment = new Compartment()
@@ -57,6 +59,9 @@ export function createState(
       history(),
       drawSelection(),
       codeFolding(),
+      snippetExtensions,
+      pageBreakKeymap,
+      unfoldOnCursor,
       keymap.of([...foldBindings(), ...defaultKeymap, ...historyKeymap, indentWithTab]),
       markdown({ base: markdownLanguage, codeLanguages: languages, extensions: [Frontmatter] }),
       rfHighlight,

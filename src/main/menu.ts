@@ -81,6 +81,8 @@ export function buildMenuTemplate(d: MenuDeps): MenuItemConstructorOptions[] {
       { role: 'copy', label: 'Kopieren' },
       { role: 'paste', label: 'Einfügen' },
       item('select-all', 'Alles auswählen', 'CmdOrCtrl+A'),
+      sep,
+      item('insert-pagebreak', 'Seitenumbruch einfügen', 'CmdOrCtrl+Enter'),
     ],
   }
 
