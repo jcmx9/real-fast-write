@@ -483,10 +483,14 @@ describe('NoteWatcher re-arm', () => {
     expect(live).toHaveLength(1)
     live[0]?.fire()
     expect(live[0]?.close).toHaveBeenCalled()
-    vi.advanceTimersByTime(1000)
-    expect(live).toHaveLength(2)
+    // The folder may be gone: its files are checked at once (deleted folder → held tabs) ...
     await vi.advanceTimersByTimeAsync(100)
     expect(reads).toEqual([join(dir, 'a.md')])
+    await vi.advanceTimersByTimeAsync(900)
+    expect(live).toHaveLength(2)
+    // ... and once more after the re-arm, for changes during the gap.
+    await vi.advanceTimersByTimeAsync(100)
+    expect(reads).toEqual([join(dir, 'a.md'), join(dir, 'a.md')])
     w.close()
   })
 
@@ -623,5 +627,115 @@ describe('NoteWatcher re-arm', () => {
       await vi.advanceTimersByTimeAsync(1000)
       expect(got).toEqual([])
     })
+  })
+})
+
+describe('NoteWatcher holds that must lift or appear without file events', () => {
+  type Listener = (event: string, name: string) => void
+  const file = () => join(dir, 'h.md')
+  let disk: Map<string, Buffer>
+  let readError: string | null
+  let folderGone: boolean
+  let watchers: { fire: () => void; listener: Listener }[]
+  let got: ExternalChange[]
+
+  const watch = ((_d: string, listener: Listener) => {
+    if (folderGone) throw Object.assign(new Error('ENOENT: no such directory'), { code: 'ENOENT' })
+    const handlers: Record<string, () => void> = {}
+    const w = {
+      close: () => undefined,
+      on: (ev: string, fn: () => void) => {
+        handlers[ev] = fn
+        return w
+      },
+      fire: () => handlers.error?.(),
+      listener,
+    }
+    watchers.push(w)
+    return w
+  }) as unknown as WatcherDeps['watch']
+
+  function make(): NoteWatcher {
+    return new NoteWatcher(
+      (c) => got.push(c),
+      100,
+      async (p) => {
+        if (readError) throw Object.assign(new Error(`${readError}: locked`), { code: readError })
+        const b = disk.get(p)
+        if (!b) throw Object.assign(new Error('gone'), { code: 'ENOENT' })
+        return b
+      },
+      { watch },
+    )
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    disk = new Map([[file(), Buffer.from('alt')]])
+    readError = null
+    folderGone = false
+    watchers = []
+    got = []
+  })
+  afterEach(() => vi.useRealTimers())
+
+  it('a deleted folder holds its files although the re-arm keeps failing (ENOENT)', async () => {
+    const w = make()
+    await writeFile(file(), 'alt')
+    w.setFiles([file()])
+    disk.delete(file())
+    folderGone = true
+    watchers[0]?.fire() // the folder watch dies with the folder
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(got).toEqual([{ kind: 'deleted', path: file() }])
+    w.close()
+  })
+
+  it('a folder missing when watching starts reports its files deleted', async () => {
+    const w = make()
+    await writeFile(file(), 'alt')
+    w.expect(file(), hashBytes(Buffer.from('alt'))) // the note was loaded before
+    disk.delete(file())
+    folderGone = true
+    w.setFiles([file()])
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(got).toEqual([{ kind: 'deleted', path: file() }])
+    w.close()
+  })
+
+  it('a lasting read error is re-checked with backoff and reported once it reads again', async () => {
+    const w = make()
+    await writeFile(file(), 'alt')
+    w.setFiles([file()])
+    readError = 'EBUSY'
+    watchers[0]?.listener('change', 'h.md')
+    await vi.advanceTimersByTimeAsync(300)
+    expect(got.map((c) => c.kind)).toEqual(['unreadable'])
+    // The lock outlives the confirm; releasing it produces no file event.
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(got).toHaveLength(1)
+    readError = null
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(got).toHaveLength(2)
+    expect(got[1]).toMatchObject({ kind: 'changed', note: { text: 'alt' } })
+    // Settled: no more re-checks, no more events.
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(got).toHaveLength(2)
+    w.close()
+  })
+
+  it('stops re-checking an unreadable file once it is no longer watched or on close', async () => {
+    const w = make()
+    await writeFile(file(), 'alt')
+    w.setFiles([file()])
+    readError = 'EACCES'
+    watchers[0]?.listener('change', 'h.md')
+    await vi.advanceTimersByTimeAsync(300)
+    w.setFiles([])
+    readError = null
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(got.map((c) => c.kind)).toEqual(['unreadable'])
+    w.close()
+    expect(vi.getTimerCount()).toBe(0)
   })
 })

@@ -36,6 +36,11 @@ export class NoteWatcher {
     string,
     { timer: ReturnType<typeof setTimeout>; attempt: number }
   >()
+  /** Pending re-check per file held as unreadable (error), with the attempts so far. */
+  private readonly rechecks = new Map<
+    string,
+    { timer: ReturnType<typeof setTimeout> | null; attempt: number }
+  >()
   private readonly deps: WatcherDeps
   private closed = false
 
@@ -59,6 +64,7 @@ export class NoteWatcher {
     for (const p of previous) {
       if (this.files.has(p)) continue
       this.known.delete(p)
+      this.clearRecheck(p)
       const pending = this.timers.get(p)
       if (pending) clearTimeout(pending)
       this.timers.delete(p)
@@ -98,8 +104,10 @@ export class NoteWatcher {
       w = this.deps.watch(dir, (_event, name) => {
         if (name) this.ping(join(dir, name.toString()))
       })
-    } catch {
-      // Folder vanished or is not watchable (yet): try again shortly.
+    } catch (err) {
+      // Folder vanished or is not watchable (yet): try again shortly. A missing folder means
+      // missing files: check them, so their tabs are held as deleted (once, see readFailed).
+      if (errorCode(err) === 'ENOENT') this.checkFolder(dir)
       this.scheduleRetry(dir, attempt)
       return
     }
@@ -107,13 +115,17 @@ export class NoteWatcher {
       w.close()
       if (this.dirs.get(dir) !== w) return
       this.dirs.delete(dir)
+      // The folder may be gone (Windows reports its deletion this way): look at its files now.
+      this.checkFolder(dir)
       this.scheduleRetry(dir, 0)
     })
     this.dirs.set(dir, w)
-    if (attempt > 0) {
-      // Changes during the gap produced no events: look at every file of the folder once.
-      for (const p of this.files) if (dirname(p) === dir) this.schedule(p, false)
-    }
+    // Changes during the gap produced no events: look at every file of the folder once.
+    if (attempt > 0) this.checkFolder(dir)
+  }
+
+  private checkFolder(dir: string): void {
+    for (const p of this.files) if (dirname(p) === dir) this.schedule(p, false)
   }
 
   private scheduleRetry(dir: string, attempt: number): void {
@@ -136,6 +148,7 @@ export class NoteWatcher {
       entry.latest = hash
       // Our own write replaces whatever made the file missing or unreadable.
       entry.failure = undefined
+      this.clearRecheck(path)
     } else {
       this.known.set(path, { accepted: new Set([hash]), own: new Set([hash]), latest: hash })
     }
@@ -167,6 +180,29 @@ export class NoteWatcher {
     this.retries.clear()
     for (const t of this.timers.values()) clearTimeout(t)
     this.timers.clear()
+    for (const p of [...this.rechecks.keys()]) this.clearRecheck(p)
+  }
+
+  /**
+   * A file held as unreadable gets no event when the lock goes away (AV scan, sync upload):
+   * read it again with the re-arm backoff until it is readable, missing or no longer watched.
+   */
+  private scheduleRecheck(path: string): void {
+    const current = this.rechecks.get(path)
+    if (current?.timer) return
+    const attempt = current?.attempt ?? 0
+    const delay = Math.min(RETRY_BASE_MS * 2 ** attempt, RETRY_MAX_MS)
+    const timer = this.deps.setTimeout(() => {
+      this.rechecks.set(path, { timer: null, attempt: attempt + 1 })
+      void this.check(path, true)
+    }, delay)
+    this.rechecks.set(path, { timer, attempt })
+  }
+
+  private clearRecheck(path: string): void {
+    const current = this.rechecks.get(path)
+    if (current?.timer) this.deps.clearTimeout(current.timer)
+    this.rechecks.delete(path)
   }
 
   private ping(path: string): void {
@@ -198,6 +234,7 @@ export class NoteWatcher {
       return
     }
     if (this.closed || !this.files.has(path)) return
+    this.clearRecheck(path)
     const hash = hashBytes(bytes)
     const entry = this.known.get(path)
     if (!entry?.failure) {
@@ -234,12 +271,16 @@ export class NoteWatcher {
         this.schedule(path, true)
         return
       }
+      this.clearRecheck(path)
       // Nothing is accepted any more: a later file at this path is reported, unless it is ours.
       this.known.set(path, { accepted: new Set(), own: new Set(), latest: '', failure: 'deleted' })
       this.onChange({ kind: 'deleted', path })
       return
     }
-    if (entry?.failure === 'error') return
+    if (entry?.failure === 'error') {
+      this.scheduleRecheck(path)
+      return
+    }
     // Locks by AV scanners or sync clients and Windows' delete-pending state pass quickly.
     if (!confirming && code !== undefined && RETRY_CODES.has(code)) {
       this.schedule(path, true)
@@ -251,6 +292,7 @@ export class NoteWatcher {
       latest: entry?.latest ?? '',
       failure: 'error',
     })
+    this.scheduleRecheck(path)
     this.onChange({
       kind: 'unreadable',
       path,
