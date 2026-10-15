@@ -13,13 +13,73 @@
 
 ## Status
 
-In Entwicklung. Vorhanden: Tabs, Autosave mit atomarem Schreiben, Umbenennen, Wiederherstellen der Sitzung, Erkennen externer Änderungen (auch gelöschte oder nicht lesbare Notizen, ohne stilles Überschreiben) und PDF-Export über rf-document sowie die PDF-Optik in der Vorschau. Der Präsentationsmodus (Vollbild, größerer Text, Infozeile) und Snippets sind verfügbar. Noch nicht vorhanden: die Installation per Einzeiler.
+In Entwicklung. Vorhanden: Tabs, Autosave mit atomarem Schreiben, Umbenennen, Wiederherstellen der Sitzung, Erkennen externer Änderungen (auch gelöschte oder nicht lesbare Notizen, ohne stilles Überschreiben) und PDF-Export über rf-document sowie die PDF-Optik in der Vorschau. Der Präsentationsmodus (Vollbild, größerer Text, Infozeile) und Snippets sind verfügbar. Die Installation und Aktualisierung per Einzeiler sowie der Einstellungsdialog sind verfügbar.
 
 ## Voraussetzungen (Entwicklung)
 
 - Node.js ≥ 22.12 (CI: 24)
 - npm, Git
 - für den Export: real-fast-document
+
+## Installation
+
+macOS und Linux:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jcmx9/real-fast-write/main/scripts/bootstrap.sh | bash
+```
+
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/jcmx9/real-fast-write/main/scripts/bootstrap.ps1 | iex
+```
+
+Das Skript lädt das passende Archiv der neuesten stabilen GitHub-Release, prüft es gegen `SHA256SUMS` und installiert ohne Adminrechte. Fehlt rf-document, führt es dessen eigenen Bootstrap aus.
+
+| System | Programm | Befehl |
+|--------|----------|--------|
+| macOS | `~/Applications/rf-write.app` | `~/.local/bin/rf-write` |
+| Linux | `~/.local/share/real-fast-write/rf-write.AppImage` und `~/.local/share/applications/rf-write.desktop` | `~/.local/bin/rf-write` |
+| Windows | `%LOCALAPPDATA%\real-fast-write\` und Startmenü-Verknüpfung | `%LOCALAPPDATA%\Microsoft\WindowsApps\rf-write.cmd` (bereits im PATH) |
+
+Die App ist nicht signiert. Unter macOS ist sie ad-hoc signiert, und das Skript entfernt die Quarantäne-Markierung, sodass Gatekeeper nicht blockiert. Unter Windows kann SmartScreen warnen. Unter Linux braucht das AppImage `libfuse2`. Auf Ubuntu 24.04 und neuer sperrt AppArmor unprivilegierte User-Namespaces, dann startet rf-write nicht; das Skript warnt in diesem Fall und nennt die Abhilfe (`kernel.apparmor_restrict_unprivileged_userns=0`, braucht sudo). Das Startprotokoll liegt unter `~/.local/share/real-fast-write/launch.log`.
+
+## Update
+
+Den Installationsbefehl erneut ausführen. Die installierte Version wird ersetzt; schlägt der Download fehl, bleibt die alte Version unverändert. Eine bestimmte Version: `... | bash -s -- --version 26.10.0` bzw. `-Version 26.10.0` unter Windows.
+
+## Deinstallation
+
+macOS und Linux:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jcmx9/real-fast-write/main/scripts/bootstrap.sh | bash -s -- --uninstall
+```
+
+Windows (PowerShell):
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/jcmx9/real-fast-write/main/scripts/bootstrap.ps1))) -Uninstall
+```
+
+Entfernt wird nur, was die rf-write-Installation angelegt hat (erkennbar an ihrer Installationsmarkierung). rf-document, die Einstellungen und Notizen bleiben unangetastet.
+
+## Testversion
+
+Vorabversionen (Pre-Releases) zum Testen; sie können älter sein als die neueste stabile Version:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jcmx9/real-fast-write/dev/scripts/bootstrap.sh | bash -s -- --pre
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/jcmx9/real-fast-write/dev/scripts/bootstrap.ps1))) -Pre
+```
+
+## Einstellungen
+
+„Einstellungen …“ (macOS Cmd+, im App-Menü, sonst Ctrl+, im Menü „Datei“) öffnet den Dialog: Standardordner für neue Notizen, Snippet-Ordner, Pfad zu rf-document (leer = automatisch suchen), Schriftfaktor im Präsentationsmodus und die Voreinstellung für den YAML-Header in der Vorschau (als YAML oder als Titelblock). Ein schreibgeschützter Statusblock zeigt, ob rf-document und die Schriften gefunden wurden. Das Ändern des Standardordners verschiebt oder löscht keine Dateien.
 
 ## Verwendung
 
@@ -32,7 +92,7 @@ rf-write --help
 
 Symbolische Links auf einzelne Notizen öffnen die verlinkte Datei (Tab-Name, Umbenennen und Export beziehen sich auf sie); verlinkte Ordner sind davon nicht betroffen.
 
-Der Befehl `rf-write` steht nach der Installation zur Verfügung (ein One-Line-Installer ist geplant); in der Entwicklung startet `npm run dev` die App. Die Einstellungen liegen in `settings.json` im App-Datenordner (macOS `~/Library/Application Support/rf-write`, Windows `%APPDATA%\rf-write`, Linux `~/.config/rf-write`); bearbeitet werden sie unter „Einstellungen …“ (macOS Cmd+, im App-Menü, sonst Ctrl+, im Menü „Datei“).
+Der Befehl `rf-write` steht nach der Installation zur Verfügung; in der Entwicklung startet `npm run dev` die App. Die Einstellungen liegen in `settings.json` im App-Datenordner (macOS `~/Library/Application Support/rf-write`, Windows `%APPDATA%\rf-write`, Linux `~/.config/rf-write`); bearbeitet werden sie unter „Einstellungen …“ (macOS Cmd+, im App-Menü, sonst Ctrl+, im Menü „Datei“).
 
 Die Preview nutzt die Schriften von rf-document aus dessen Installationsordner und fällt andernfalls auf Systemschriften zurück. Fließtext wird wie im PDF von rf-document im Blocksatz ohne Silbentrennung gesetzt; getrennt wird erst beim Export durch Typst.
 
