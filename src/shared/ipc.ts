@@ -17,5 +17,6 @@ export const Ch = {
   closeReady: 'rfw:close-ready',
   setFullScreen: 'rfw:set-fullscreen',
   fullScreenLeft: 'rfw:fullscreen-left',
+  fullScreenRefused: 'rfw:fullscreen-refused',
   listSnippets: 'rfw:list-snippets',
 } as const

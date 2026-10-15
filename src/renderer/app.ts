@@ -3,14 +3,28 @@ import { redo, selectAll, undo } from '@codemirror/commands'
 import { foldCode, unfoldAll, unfoldCode } from '@codemirror/language'
 import type { EditorState, TransactionSpec } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
-import type { ExportResult, MenuCommand, Mode, NoteFile, View } from '../shared/types'
+import type {
+  ExportResult,
+  ExternalChange,
+  MenuCommand,
+  Mode,
+  NoteFile,
+  View,
+} from '../shared/types'
 import { AutosaveScheduler } from './editor/autosave'
 import { headerHidden, headerToggleSpec, moveOutOfHeader } from './editor/header'
 import { modeCompartment, modeExtensions } from './editor/mode'
 import { jumpToEntry, OutlineSync, toggleEntryFold } from './editor/outline-actions'
 import { insertPageBreak } from './editor/pagebreak'
 import { foldAllSections } from './editor/sections'
-import { createState, serializeDoc, viewCompartment, viewExtensions } from './editor/setup'
+import {
+  createState,
+  freezeSpec,
+  isFrozen,
+  serializeDoc,
+  viewCompartment,
+  viewExtensions,
+} from './editor/setup'
 import { snippetRegistry } from './editor/snippets'
 import { type Tab, TabStore } from './tabs/tab-store'
 import { editTarget } from './ui/edit-target'
@@ -18,11 +32,12 @@ import { InfoLine } from './ui/infoline'
 import { Notices } from './ui/notices'
 import { Outline } from './ui/outline'
 import { askText } from './ui/prompt'
-import { SAVE_STATE_LABEL, type SaveState, StatusLine } from './ui/statusline'
+import { type SaveState, StatusLine, saveText } from './ui/statusline'
 import { TabBar } from './ui/tabbar'
 import { editorSizes, handleZoomKey, zoomIn, zoomOut } from './ui/zoom'
+import { closeWindow } from './util/close-guard'
 import { fileName } from './util/path'
-import { SerialQueue } from './util/serial'
+import { LatestToggle, SerialQueue } from './util/serial'
 
 const INSTALL_HINT = [
   'macOS/Linux:',
@@ -33,6 +48,8 @@ const INSTALL_HINT = [
 ].join('\n')
 
 const CONFLICT_ERROR = 'Externe Änderung – bitte im Hinweis entscheiden'
+const UNREADABLE_ERROR = 'Externe Fassung nicht lesbar – bitte im Hinweis entscheiden'
+const DELETED_ERROR = 'Datei außerhalb gelöscht – bitte im Hinweis entscheiden'
 
 const MAX_SAVE_ROUNDS = 3
 
@@ -70,11 +87,34 @@ export class App {
    * fullscreen survives Present) and never reports its own leave as an OS leave.
    */
   private readonly fullScreenOps = new SerialQueue()
+  /**
+   * Toggle-present while a fullscreen request is in flight (main settles an enter only once
+   * the window is fullscreen or the OS refused it) is remembered, not dropped: last intent wins.
+   */
+  private readonly presentToggle = new LatestToggle(
+    () => this.mode === 'present',
+    (on) => (on ? this.enterPresent() : this.exitPresent()),
+  )
   private shownId: number | null = null
   private readonly saveErrors = new Map<number, string>()
+  /** Tabs held after an external change: no saving until the user answers the banner. */
   private readonly conflicts = new Set<number>()
+  /** Tabs whose content is not on disk although clean (file deleted or made unreadable outside). */
+  private readonly unwritten = new Set<number>()
+  /** Status warning of a tab held because its file was deleted or became unreadable. */
+  private readonly holdWarnings = new Map<number, string>()
+  /** Hash of the bytes each tab last loaded or saved, to recognise our own content on disk. */
+  private readonly savedHashes = new Map<number, string>()
+  /**
+   * Tabs whose next write may replace whatever is on disk: the user chose to keep or save their
+   * version over an external change, a deletion or unreadable bytes. Cleared by the next
+   * successful write and by every new external change.
+   */
+  private readonly overwrite = new Set<number>()
   private readonly saving = new Map<number, Promise<boolean>>()
   private sessionTimer: ReturnType<typeof setTimeout> | null = null
+  /** The running window close; input into every tab is frozen while it is set. */
+  private closing: Promise<boolean> | null = null
 
   constructor(private readonly root: AppRoot) {
     this.editor = new EditorView({
@@ -115,6 +155,12 @@ export class App {
     this.rfw.onFullScreenLeft(() => {
       if (this.mode === 'present') void this.exitPresent(false)
     })
+    this.rfw.onFullScreenRefused(() => {
+      // A meeting must not lose Present because the OS refused fullscreen. No notice when a
+      // toggle during the refused enter already asked to leave Present (it ends right after).
+      if (this.mode === 'present' && this.presentToggle.pendingWant !== false)
+        this.notices.toast('Vollbild nicht verfügbar – Präsentation im Fenster')
+    })
     root.empty
       .querySelector('[data-action=new]')
       ?.addEventListener('click', () => void this.newNote())
@@ -123,7 +169,7 @@ export class App {
       ?.addEventListener('click', () => void this.open())
     this.rfw.onMenu((cmd) => void this.command(cmd))
     this.rfw.onOpenPaths((paths) => void this.openPaths(paths))
-    this.rfw.onExternalChange((note) => this.externalChange(note))
+    this.rfw.onExternalChange((change) => this.externalChange(change))
     this.rfw.onBeforeClose(() => this.beforeClose())
     window.addEventListener('keydown', (e) => this.globalKeys(e))
     window.addEventListener('blur', () => void this.autosave.flush())
@@ -164,6 +210,8 @@ export class App {
   // ── commands ────────────────────────────────────────────────────────────
 
   private async command(cmd: MenuCommand): Promise<void> {
+    // While the window closes nothing may change a document, a path or the tab list.
+    if (this.closing) return
     if (
       this.mode === 'present' &&
       (cmd === 'export' || cmd === 'toggle-view' || cmd === 'toggle-header')
@@ -230,9 +278,7 @@ export class App {
       case 'zoom-reset':
         return this.setZoom(1)
       case 'toggle-present':
-        // A held or hammered shortcut must not flap while a fullscreen request is in flight.
-        if (this.fullScreenOps.busy) return
-        return this.mode === 'present' ? this.exitPresent() : this.enterPresent()
+        return this.presentToggle.toggle()
     }
   }
 
@@ -301,6 +347,7 @@ export class App {
   }
 
   private async newNote(): Promise<void> {
+    if (this.closing) return
     const path = await this.rfw.newNotePath()
     this.store.add({
       path,
@@ -332,7 +379,7 @@ export class App {
       this.notices.panel('Nicht geöffnet', `${path}\n\n${res.error}`)
       return false
     }
-    this.store.add({
+    const tab = this.store.add({
       path,
       state: createState(res.text, res.eol, this.effectiveView(), hideHeader, this.mode),
       bom: res.bom,
@@ -340,6 +387,7 @@ export class App {
       onDisk: true,
       headerHidden: hideHeader,
     })
+    this.savedHashes.set(tab.id, res.hash)
     return true
   }
 
@@ -453,16 +501,21 @@ export class App {
     this.outline.refresh()
   }
 
-  private async closeTab(id: number): Promise<void> {
+  /** discard: the user already chose to drop unsaved content (no save, no prompt). */
+  private async closeTab(id: number, discard = false): Promise<void> {
     const tab = this.store.get(id)
     if (!tab) return
-    let saved = true
-    for (let i = 0; i < MAX_SAVE_ROUNDS && this.store.isDirty(tab); i++) {
-      saved = await this.saveTab(tab)
-      if (!saved) break
-    }
-    if (!saved || this.store.isDirty(tab)) {
-      if (!(await this.rfw.confirmDiscard([fileName(tab.path)]))) return
+    // A banner's „Tab schließen“ (discard) is the user's explicit choice and stays allowed.
+    if (this.closing && !discard) return
+    if (!discard) {
+      let saved = true
+      for (let i = 0; i < MAX_SAVE_ROUNDS && this.unsaved(tab); i++) {
+        saved = await this.saveTab(tab)
+        if (!saved) break
+      }
+      if (!saved || this.unsaved(tab)) {
+        if (!(await this.rfw.confirmDiscard([fileName(tab.path)]))) return
+      }
     }
     if (!tab.onDisk) {
       try {
@@ -475,6 +528,10 @@ export class App {
     this.notices.dismiss(tab.path)
     this.saveErrors.delete(id)
     this.conflicts.delete(id)
+    this.unwritten.delete(id)
+    this.holdWarnings.delete(id)
+    this.savedHashes.delete(id)
+    this.overwrite.delete(id)
     this.saving.delete(id)
     // Present never shows the empty state.
     if (this.mode === 'present' && this.store.all.length === 0) await this.exitPresent()
@@ -485,7 +542,8 @@ export class App {
     const tab = this.store.active
     if (!tab) return
     const name = await askText('Umbenennen', 'Neuer Dateiname', fileName(tab.path))
-    if (!name) return
+    // A dialog answered after the window started closing must not move the file under it.
+    if (!name || this.closing) return
     if (!(await this.saveTab(tab, true))) {
       this.notices.panel(
         'Umbenennen nicht möglich',
@@ -562,28 +620,49 @@ export class App {
   }
 
   private async writeTab(tab: Tab, force: boolean): Promise<boolean> {
-    if (!this.store.isDirty(tab) && (tab.onDisk || !force)) return true
+    if (!this.unsaved(tab) && (tab.onDisk || !force)) return true
     if (this.conflicts.has(tab.id)) {
-      this.saveErrors.set(tab.id, CONFLICT_ERROR)
+      if (!this.saveErrors.has(tab.id)) this.saveErrors.set(tab.id, CONFLICT_ERROR)
       this.refresh()
       return false
     }
     const doc = tab.state.doc
     let res: Awaited<ReturnType<typeof this.rfw.saveNote>>
     try {
-      res = await this.rfw.saveNote(tab.path, serializeDoc(doc, tab.eol), tab.bom)
+      // Main writes only over the base (or our own newer write) unless the user chose to
+      // overwrite: an external change inside the watcher's debounce is never replaced silently.
+      res = await this.rfw.saveNote(
+        tab.path,
+        serializeDoc(doc, tab.eol),
+        tab.bom,
+        this.savedHashes.get(tab.id) ?? null,
+        this.overwrite.has(tab.id),
+      )
     } catch (e) {
       res = { ok: false, error: e instanceof Error ? e.message : String(e) }
     }
     if (!res.ok) {
-      this.saveErrors.set(tab.id, res.error)
+      if ('conflict' in res) {
+        // Follow a case-only rename outside first, so the conflict finds this tab.
+        if (res.path !== undefined && res.path !== tab.path) {
+          this.store.setPath(tab.id, res.path)
+          this.syncMain()
+        }
+        this.externalChange(res.conflict)
+      } else this.saveErrors.set(tab.id, res.error)
       this.refresh()
       return false
     }
+    // A case-only rename outside (a.md → A.md): the tab follows the file's new spelling.
+    const moved = res.path !== undefined && res.path !== tab.path
+    if (moved && res.path) this.store.setPath(tab.id, res.path)
     const firstSave = !tab.onDisk
     this.store.markSaved(tab.id, doc)
+    this.savedHashes.set(tab.id, res.hash)
+    this.overwrite.delete(tab.id)
+    this.unwritten.delete(tab.id)
     this.saveErrors.delete(tab.id)
-    if (firstSave) this.syncMain()
+    if (firstSave || moved) this.syncMain()
     this.refresh()
     return true
   }
@@ -596,30 +675,92 @@ export class App {
     return ok
   }
 
-  private async beforeClose(): Promise<boolean> {
-    let saved = await this.autosave.flush()
-    // Typing during the save leaves the tab dirty again: save again (bounded).
-    for (let i = 0; i < MAX_SAVE_ROUNDS && this.store.all.some((t) => this.store.isDirty(t)); i++) {
-      saved = await this.saveAll()
-      if (!saved) break
+  /**
+   * Input is frozen first, so saving converges: every keystroke is on disk or the user agreed
+   * to discard it. A held tab cannot be saved and always reaches the prompt. A second close
+   * request while one runs gets the same answer.
+   */
+  private beforeClose(): Promise<boolean> {
+    if (this.closing) return this.closing
+    const run = closeWindow({
+      freeze: () => this.freezeInput(true),
+      unfreeze: () => this.freezeInput(false),
+      flush: () => this.autosave.flush(),
+      saveAll: () => this.saveAll(),
+      pending: () => this.store.all.filter((t) => this.unsaved(t)).map((t) => fileName(t.path)),
+      persist: () => this.persistSession(),
+      confirmDiscard: (names) => this.rfw.confirmDiscard(names),
+    })
+    this.closing = run
+    // The window stays open after a cancel or an error: accept input and closes again.
+    run.then(
+      (ok) => {
+        if (!ok) this.closing = null
+      },
+      () => {
+        this.closing = null
+      },
+    )
+    return run
+  }
+
+  /**
+   * Freezes or thaws input in every tab: the shown view and the stored states.
+   * IME: text an input method is still composing at the freeze is saved as CodeMirror already
+   * mirrored it into the state (possibly the unconverted pre-edit text); the later commit and
+   * any keystroke whose DOM change was not read yet are dropped. Both stay "up to the freeze".
+   */
+  private freezeInput(frozen: boolean): void {
+    if (frozen) closeCompletion(this.editor)
+    const spec = freezeSpec(frozen)
+    for (const tab of this.store.all) {
+      if (tab.id === this.shownId) this.editor.dispatch(spec)
+      else this.store.updateState(tab.id, tab.state.update(spec).state)
     }
-    try {
-      await this.persistSession()
-    } catch (e) {
-      // Closing must not depend on the session write.
-      console.error('persistSession failed', e)
-    }
-    if (saved) return true
-    const names = this.store.all.filter((t) => this.store.isDirty(t)).map((t) => fileName(t.path))
-    return this.rfw.confirmDiscard(names)
+    if (!frozen && this.shownId !== null) this.editor.focus()
+  }
+
+  /** A state shown while closing (new tab, reload) is frozen like the others. */
+  private closingState(state: EditorState): EditorState {
+    return this.closing && !isFrozen(state) ? state.update(freezeSpec(true)).state : state
   }
 
   // ── external changes ────────────────────────────────────────────────────
 
-  private externalChange(note: NoteFile): void {
+  /** Dirty, or clean but its content is no longer on disk. */
+  private unsaved(tab: Tab): boolean {
+    return this.store.isDirty(tab) || this.unwritten.has(tab.id)
+  }
+
+  private externalChange(change: ExternalChange): void {
+    const changed = this.store.findByPath(
+      change.kind === 'changed' ? change.note.path : change.path,
+    )
+    // A new external state needs a new decision before anything overwrites it.
+    if (changed) this.overwrite.delete(changed.id)
+    if (change.kind !== 'changed') {
+      this.holdUnloadable(change)
+      return
+    }
+    const note = change.note
     const tab = this.store.findByPath(note.path)
     if (!tab) return
+    if (note.hash === this.savedHashes.get(tab.id)) {
+      // Our own last saved bytes are back (after a deletion or a read error): nothing changed
+      // externally, so only lift the hold; unsaved typing is autosaved as usual.
+      if (this.unwritten.delete(tab.id)) {
+        this.clearConflict(tab.id)
+        this.notices.dismiss(note.path)
+        this.refresh()
+        this.autosave.touch()
+      }
+      return
+    }
+    // Readable content is back on disk: the normal conflict/reload logic replaces any hold.
+    this.unwritten.delete(tab.id)
+    this.holdWarnings.delete(tab.id)
     if (!this.store.isDirty(tab)) {
+      this.notices.dismiss(note.path)
       this.clearConflict(tab.id)
       this.reload(tab, note)
       return
@@ -638,6 +779,10 @@ export class App {
           label: 'Meine behalten',
           run: () => {
             this.clearConflict(tab.id)
+            this.overwrite.add(tab.id)
+            // The disk holds the outside version: write this tab even if it is clean again
+            // (e.g. undone back to the last saved text).
+            this.unwritten.add(tab.id)
             this.refresh()
             this.autosave.touch()
           },
@@ -647,7 +792,52 @@ export class App {
     )
   }
 
+  /** Holds the tab like a conflict, dirty or not: autosave must not write over this state. */
+  private holdUnloadable(change: Exclude<ExternalChange, { kind: 'changed' }>): void {
+    const tab = this.store.findByPath(change.path)
+    if (!tab) return
+    const name = fileName(change.path)
+    let message: string
+    let saveLabel: string
+    if (change.kind === 'deleted') {
+      message = `„${name}“ wurde außerhalb gelöscht.`
+      saveLabel = 'Erneut speichern'
+    } else {
+      if (change.reason === 'encoding') {
+        message = `„${name}“ wurde außerhalb geändert und ist kein gültiges UTF-8. rf-write speichert nicht darüber.`
+      } else {
+        message = `„${name}“ kann nicht mehr gelesen werden. rf-write speichert nicht darüber.`
+        console.error(`${change.path}: ${change.message}`)
+      }
+      saveLabel = 'Meine Fassung speichern (überschreiben)'
+    }
+    this.conflicts.add(tab.id)
+    this.unwritten.add(tab.id)
+    const warning = change.kind === 'deleted' ? DELETED_ERROR : UNREADABLE_ERROR
+    this.holdWarnings.set(tab.id, warning)
+    this.saveErrors.set(tab.id, warning)
+    this.refresh()
+    this.notices.banner(
+      message,
+      [
+        {
+          label: saveLabel,
+          run: () => {
+            this.clearConflict(tab.id)
+            this.overwrite.add(tab.id)
+            this.refresh()
+            void this.saveTab(tab)
+          },
+        },
+        { label: 'Tab schließen', run: () => void this.closeTab(tab.id, true) },
+      ],
+      change.path,
+      change.kind === 'unreadable' && change.reason === 'error' ? change.message : undefined,
+    )
+  }
+
   private clearConflict(id: number): void {
+    this.holdWarnings.delete(id)
     this.conflicts.delete(id)
     this.saveErrors.delete(id)
   }
@@ -663,21 +853,22 @@ export class App {
   }
 
   private reload(tab: Tab, note: NoteFile): void {
-    const state = createState(
-      note.text,
-      note.eol,
-      this.effectiveView(),
-      tab.headerHidden,
-      this.mode,
+    const state = this.closingState(
+      createState(note.text, note.eol, this.effectiveView(), tab.headerHidden, this.mode),
     )
+    const wasOnDisk = tab.onDisk
     tab.bom = note.bom
     tab.eol = note.eol
+    this.savedHashes.set(tab.id, note.hash)
+    this.unwritten.delete(tab.id)
     this.store.updateState(tab.id, state)
     this.store.markSaved(tab.id, state.doc)
     if (this.shownId === tab.id) {
       this.editor.setState(state)
       this.outline.invalidate()
     }
+    // A new note whose path a file took meanwhile (refused first save) is now watched.
+    if (!wasOnDisk) this.syncMain()
     this.refresh()
   }
 
@@ -691,7 +882,9 @@ export class App {
       // Close an open snippet list in the tab being left (routed to shownId), so it does not
       // reappear there later and a stray Enter inserts a snippet typed long ago.
       if (this.shownId !== null) closeCompletion(this.editor)
-      this.editor.setState(tab.state)
+      const state = this.closingState(tab.state)
+      if (state !== tab.state) this.store.updateState(tab.id, state)
+      this.editor.setState(state)
       this.editor.focus()
       this.outline.invalidate()
     }
@@ -703,10 +896,12 @@ export class App {
 
   private refresh(): void {
     const tab = this.store.active
-    this.tabBar.render(this.store.all, this.store.activeIndex, (t) => this.store.isDirty(t))
-    const error = tab ? (this.saveErrors.get(tab.id) ?? null) : null
+    this.tabBar.render(this.store.all, this.store.activeIndex, (t) => this.unsaved(t))
+    const hold = tab ? (this.holdWarnings.get(tab.id) ?? null) : null
+    const error = hold ?? (tab ? (this.saveErrors.get(tab.id) ?? null) : null)
     let state: SaveState = 'saved'
-    if (error) state = 'error'
+    if (hold) state = 'held'
+    else if (error) state = 'error'
     else if (tab && this.store.isDirty(tab)) state = 'dirty'
     else if (tab && !tab.onDisk) state = 'new'
     this.status.render(tab ? fileName(tab.path) : null, state, error)
@@ -715,11 +910,9 @@ export class App {
       : 'rf-write'
     if (this.mode === 'present') {
       this.infoLine.render(
-        this.store.all.map((t) => ({ name: fileName(t.path), dirty: this.store.isDirty(t) })),
+        this.store.all.map((t) => ({ name: fileName(t.path), dirty: this.unsaved(t) })),
         this.store.activeIndex,
-        state === 'error' && error
-          ? `${SAVE_STATE_LABEL.error}: ${error}`
-          : SAVE_STATE_LABEL[state],
+        saveText(state, error),
         this.zoom.present,
       )
     }

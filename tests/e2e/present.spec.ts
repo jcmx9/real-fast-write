@@ -1,7 +1,7 @@
 import { copyFile, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { type ElectronApplication, expect, test } from '@playwright/test'
-import { clickMenu, launch, makeDirs, shot, waitForFile } from './helpers'
+import { type ElectronApplication, expect } from '@playwright/test'
+import { clickMenu, launch, makeDirs, shot, test, waitForFile } from './helpers'
 
 const FIXTURE = join(__dirname, '..', 'fixtures', 'preview.md')
 const linux = process.platform === 'linux'
@@ -126,8 +126,9 @@ test('export, view switch and header toggle are refused in Present', async () =>
       for (const t of document.querySelectorAll('.toast')) t.remove()
     })
     await clickMenu(app, cmd)
-    await expect(page.locator('.toast')).toHaveCount(1)
-    await expect(page.locator('.toast')).toContainText('Im Präsentationsmodus nicht verfügbar')
+    // Filtered: where the OS refuses fullscreen (xvfb), its notice may arrive meanwhile.
+    const refused = page.locator('.toast', { hasText: 'Im Präsentationsmodus nicht verfügbar' })
+    await expect(refused).toHaveCount(1)
   }
   await expect(page.locator('.cm-editor.rf-preview.rf-present')).toBeVisible()
   await expect(page.locator('.panel')).toHaveCount(0)
@@ -237,5 +238,82 @@ test('a burst of Present toggles ends consistent: Edit is never fullscreen', asy
   if (present) await page.keyboard.press('Escape')
   await expect(page.locator('body.rf-mode-present')).toHaveCount(0)
   await expect.poll(() => fullScreen(app), { timeout: 10_000 }).toBe(false)
+  await app.close()
+})
+
+test('Esc with a selection in Present: the first collapses it, the second leaves', async () => {
+  const { app, page } = await openFixture()
+  await clickMenu(app, 'toggle-present')
+  await expect(page.locator('body.rf-mode-present')).toHaveCount(1)
+  await page.locator('.cm-line', { hasText: 'Ein Absatz mit' }).click()
+  await page.keyboard.press('Home')
+  await page.keyboard.press('Shift+End')
+  // drawSelection paints a non-empty selection as .cm-selectionBackground.
+  const selection = page.locator('.cm-editor .cm-selectionBackground')
+  await expect(selection.first()).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(selection).toHaveCount(0)
+  await expect(page.locator('body.rf-mode-present')).toHaveCount(1)
+  await page.keyboard.press('Escape')
+  await expect(page.locator('body.rf-mode-present')).toHaveCount(0)
+  await app.close()
+})
+
+/** Makes the OS "refuse" fullscreen: the window ignores setFullScreen. */
+const refuseFullScreen = (app: ElectronApplication) =>
+  app.evaluate(({ BrowserWindow }) => {
+    const win = BrowserWindow.getAllWindows()[0]
+    if (win) win.setFullScreen = () => {}
+  })
+
+test('a refused fullscreen keeps Present running windowed, with a notice', async () => {
+  const { app, page } = await openFixture()
+  await refuseFullScreen(app)
+  await clickMenu(app, 'toggle-present')
+  await expect(page.locator('body.rf-mode-present')).toHaveCount(1)
+  await expect(page.locator('.toast')).toContainText(
+    'Vollbild nicht verfügbar – Präsentation im Fenster',
+    { timeout: 8000 },
+  )
+  await expect(page.locator('body.rf-mode-present')).toHaveCount(1)
+  expect(await fullScreen(app)).toBe(false)
+  // Present and fullscreen stay in step afterwards: leaving and entering again work.
+  await clickMenu(app, 'toggle-present')
+  await expect(page.locator('body.rf-mode-present')).toHaveCount(0)
+  await clickMenu(app, 'toggle-present')
+  await expect(page.locator('body.rf-mode-present')).toHaveCount(1)
+  await app.close()
+})
+
+test('a toggle during an in-flight fullscreen request is applied afterwards (last wins)', async () => {
+  const { app, page } = await openFixture()
+  // A never-entering window keeps the enter request in flight for the refusal timeout.
+  await refuseFullScreen(app)
+  // Records every toast ever shown: a toast removes itself after 4 s, so a later count of 0
+  // would not prove that none appeared.
+  await page.evaluate(() => {
+    const seen: string[] = []
+    Object.assign(window, { seenToasts: seen })
+    new MutationObserver((records) => {
+      for (const r of records)
+        for (const n of r.addedNodes)
+          if (n instanceof HTMLElement && n.classList.contains('toast'))
+            seen.push(n.textContent ?? '')
+    }).observe(document.body, { childList: true, subtree: true })
+  })
+  const toasts = () =>
+    page.evaluate(() => (window as unknown as { seenToasts: string[] }).seenToasts.slice())
+  await clickMenu(app, 'toggle-present')
+  await expect(page.locator('body.rf-mode-present')).toHaveCount(1)
+  await clickMenu(app, 'toggle-present') // during the in-flight enter: remembered
+  await expect(page.locator('body.rf-mode-present')).toHaveCount(0, { timeout: 8000 })
+  // No refusal notice: the pending toggle already wanted Edit when the enter was refused.
+  expect(await toasts()).toEqual([])
+  // An even number of extra toggles is a no-op: Present stays.
+  await clickMenu(app, 'toggle-present')
+  await clickMenu(app, 'toggle-present')
+  await clickMenu(app, 'toggle-present')
+  await page.waitForTimeout(4500) // deliberately past the refusal timeout
+  await expect(page.locator('body.rf-mode-present')).toHaveCount(1)
   await app.close()
 })

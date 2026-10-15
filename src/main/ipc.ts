@@ -2,7 +2,19 @@ import { BrowserWindow, dialog, ipcMain } from 'electron'
 import { Ch } from '../shared/ipc'
 import type { NoteFile, RenameResult, SaveResult, SessionPatch } from '../shared/types'
 import { type AppContext, logSessionError } from './context'
-import { hashBytes, newNotePath, noteBytes, readNote, renameNote, writeNoteBytes } from './files'
+import {
+  canonicalPath,
+  canonicalPaths,
+  type DiskConflict,
+  diskConflict,
+  hashBytes,
+  newNotePath,
+  noteBytes,
+  readNote,
+  renameNote,
+  writeNoteBytes,
+} from './files'
+import { setWindowFullScreen } from './fullscreen'
 import { loadUserSnippets } from './snippets'
 
 const str = (v: unknown): string => {
@@ -10,6 +22,9 @@ const str = (v: unknown): string => {
   return v
 }
 const message = (err: unknown): string => (err instanceof Error ? err.message : String(err))
+
+/** Aborts a save before its rename because the disk no longer holds the tab's base. */
+class SaveConflict extends Error {}
 
 export function registerIpc(ctx: AppContext): void {
   ipcMain.handle(Ch.startup, () => ctx.startup())
@@ -19,22 +34,30 @@ export function registerIpc(ctx: AppContext): void {
    * The app only leaves a fullscreen it requested itself (FullScreenOwner); returns whether
    * the user had the window fullscreen before the request.
    */
-  ipcMain.handle(Ch.setFullScreen, (e, on: unknown): boolean => {
+  ipcMain.handle(Ch.setFullScreen, (e, on: unknown): Promise<boolean> | boolean => {
     const win = BrowserWindow.fromWebContents(e.sender)
     if (!win) return false
     const flag = on === true
-    const action = ctx.fullScreen.request(flag, win.isFullScreen())
     // macOS hides the menu bar in fullscreen itself; Windows/Linux need it hidden explicitly,
     // and shown again on leaving Present even when the user's own fullscreen stays.
     if (process.platform !== 'darwin') win.setMenuBarVisibility(!flag)
-    if (action.set !== null) win.setFullScreen(action.set)
-    return action.was
+    // An enter settles when it took effect or the OS refused it (then Present stays windowed).
+    return setWindowFullScreen(
+      ctx.fullScreen,
+      {
+        isFullScreen: () => !win.isDestroyed() && win.isFullScreen(),
+        setFullScreen: (set) => win.setFullScreen(set),
+      },
+      flag,
+      () => {
+        if (!win.isDestroyed()) win.webContents.send(Ch.fullScreenRefused)
+      },
+    )
   })
 
   ipcMain.handle(Ch.readNote, async (_e, path: unknown): Promise<NoteFile | { error: string }> => {
     try {
-      const p = str(path)
-      ctx.assertAllowed(p)
+      const p = await ctx.assertAllowed(str(path))
       const note = await readNote(p)
       ctx.watcher.expect(p, note.hash)
       void ctx.rememberRecent(p).catch(logSessionError)
@@ -45,27 +68,73 @@ export function registerIpc(ctx: AppContext): void {
   })
 
   ipcMain.handle(Ch.newNotePath, async () => {
-    const p = await newNotePath(ctx.settings.defaultFolder, new Date(), ctx.reserved)
+    // Canonical folder (also when it does not exist yet), so candidates compare against the
+    // canonical reserved set.
+    const dir = await canonicalPath(ctx.settings.defaultFolder)
+    const p = await newNotePath(dir, new Date(), ctx.reserved)
     ctx.reserved.add(p)
     ctx.allow([p])
     return p
   })
 
-  ipcMain.handle(Ch.releasePath, (_e, path: unknown) => {
-    ctx.reserved.delete(str(path))
+  ipcMain.handle(Ch.releasePath, async (_e, path: unknown) => {
+    ctx.reserved.delete(await canonicalPath(str(path)))
   })
 
+  /**
+   * Saves only over the content the tab is based on (`base`: hash of the bytes it last loaded or
+   * saved, null for a new note whose file must not exist yet) or over rf-write's own newer write.
+   * Anything else on disk was written outside and may not have been reported yet (watcher
+   * debounce): the save is refused and the disk state returned, so the renderer runs its
+   * external-change flow. `force` is the user's explicit overwrite and skips the check.
+   *
+   * The check runs after the temp file is complete, right before the atomic rename. A write by
+   * another program between that read and the rename is still replaced (residual race of a few
+   * milliseconds, longer only while a rename is retried on a locked target on Windows); the
+   * watcher then reports nothing, because the bytes on disk are ours.
+   */
   ipcMain.handle(
     Ch.saveNote,
-    async (_e, path: unknown, text: unknown, bom: unknown): Promise<SaveResult> => {
+    async (
+      _e,
+      path: unknown,
+      text: unknown,
+      bom: unknown,
+      base: unknown,
+      force: unknown,
+    ): Promise<SaveResult> => {
       try {
-        const p = str(path)
-        ctx.assertAllowed(p)
+        const p = await ctx.assertAllowed(str(path))
+        const baseHash = base === null || base === undefined ? null : str(base)
         const bytes = noteBytes(str(text), bom === true)
         const hash = hashBytes(bytes)
-        ctx.watcher.expect(p, hash)
-        await writeNoteBytes(p, bytes)
+        let conflict: DiskConflict | null = null
+        try {
+          await writeNoteBytes(p, bytes, async () => {
+            if (force !== true) {
+              conflict = await diskConflict(p, baseHash, (h) => ctx.watcher.isOwn(p, h))
+              if (conflict) throw new SaveConflict()
+            }
+            // Before the rename, so the watcher never reports our own write.
+            ctx.watcher.expect(p, hash)
+          })
+        } catch (err) {
+          const found = conflict as DiskConflict | null
+          if (!(err instanceof SaveConflict) || !found) throw err
+          // The renderer handles this state now; the watcher must not report it again.
+          ctx.watcher.acknowledge(p, found.hash ?? null)
+          // After a case-only rename outside, the tab must follow the new spelling first, or
+          // the renderer would not find the tab the conflict belongs to.
+          return p === path
+            ? { ok: false, conflict: found.change }
+            : { ok: false, conflict: found.change, path: p }
+        }
         if (ctx.reserved.delete(p)) void ctx.rememberRecent(p).catch(logSessionError)
+        // The note's spelling changed outside (case-only rename): the tab follows it.
+        if (p !== path) {
+          void ctx.renamedRecent(str(path), p).catch(logSessionError)
+          return { ok: true, hash, path: p }
+        }
         return { ok: true, hash }
       } catch (err) {
         return { ok: false, error: message(err) }
@@ -77,9 +146,8 @@ export function registerIpc(ctx: AppContext): void {
     Ch.renameNote,
     async (_e, from: unknown, newName: unknown): Promise<RenameResult> => {
       try {
-        const p = str(from)
-        ctx.assertAllowed(p)
-        const to = await renameNote(p, str(newName))
+        const p = await ctx.assertAllowed(str(from))
+        const to = await canonicalPath(await renameNote(p, str(newName)))
         ctx.allow([to])
         await ctx.renamedRecent(p, to)
         return { ok: true, path: to }
@@ -99,23 +167,28 @@ export function registerIpc(ctx: AppContext): void {
     const result = win
       ? await dialog.showOpenDialog(win, options)
       : await dialog.showOpenDialog(options)
-    ctx.allow(result.filePaths)
-    return result.filePaths
+    const paths = await canonicalPaths(result.filePaths)
+    ctx.allow(paths)
+    return paths
   })
 
   ipcMain.handle(Ch.exportPdf, async (_e, path: unknown) => {
-    const p = str(path)
-    ctx.assertAllowed(p)
-    return ctx.exportPdf(p)
+    return ctx.exportPdf(await ctx.assertAllowed(str(path)))
   })
 
   ipcMain.handle(Ch.saveSession, async (_e, patch: unknown) => {
     if (typeof patch === 'object' && patch !== null) await ctx.updateSession(patch as SessionPatch)
   })
 
-  ipcMain.handle(Ch.watch, (_e, paths: unknown) => {
+  // Each call sends the full list: only the newest one may reach the watcher, even when an
+  // older call's canonicalisation finishes later.
+  let watchGeneration = 0
+  ipcMain.handle(Ch.watch, async (_e, paths: unknown) => {
+    const generation = ++watchGeneration
     const list = Array.isArray(paths) ? paths.filter((p): p is string => typeof p === 'string') : []
-    ctx.watcher.setFiles(list.filter((p) => ctx.isAllowed(p)))
+    const canonical = await canonicalPaths(list)
+    if (generation !== watchGeneration) return
+    ctx.watcher.setFiles(canonical.filter((p) => ctx.isAllowed(p)))
   })
 
   ipcMain.handle(Ch.confirmDiscard, (_e, names: unknown) =>

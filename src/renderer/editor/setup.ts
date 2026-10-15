@@ -2,7 +2,14 @@ import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirro
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { codeFolding, foldGutter, foldKeymap, unfoldAll } from '@codemirror/language'
 import { languages } from '@codemirror/language-data'
-import { Compartment, EditorState, type Extension, type Text } from '@codemirror/state'
+import {
+  Compartment,
+  EditorState,
+  type Extension,
+  Facet,
+  type Text,
+  type TransactionSpec,
+} from '@codemirror/state'
 import { drawSelection, EditorView, type KeyBinding, keymap, lineNumbers } from '@codemirror/view'
 import type { Eol, Mode, View } from '../../shared/types'
 import { Frontmatter, frontmatterRange } from './frontmatter'
@@ -16,6 +23,32 @@ import { snippetExtensions } from './snippets'
 import { tableField } from './tables'
 
 export const viewCompartment = new Compartment()
+
+/** Input freeze while the window closes: every keystroke is either saved or confirmed lost. */
+export const closingCompartment = new Compartment()
+
+const inputFrozen = Facet.define<boolean, boolean>({ combine: (values) => values.some(Boolean) })
+
+function closingExtensions(frozen: boolean): Extension {
+  if (!frozen) return []
+  return [
+    inputFrozen.of(true),
+    EditorView.editable.of(false),
+    EditorState.readOnly.of(true),
+    // readOnly only stops user input; this also drops programmatic edits (snippet completion,
+    // checkbox toggles, page breaks) that would otherwise land after the last save.
+    EditorState.transactionFilter.of((tr) => (tr.docChanged ? [] : tr)),
+  ]
+}
+
+/** Freezes (or thaws) a state's input; works for the shown view and stored tab states alike. */
+export function freezeSpec(frozen: boolean): TransactionSpec {
+  return { effects: closingCompartment.reconfigure(closingExtensions(frozen)) }
+}
+
+export function isFrozen(state: EditorState): boolean {
+  return state.facet(inputFrozen)
+}
 
 const isMacPlatform = (): boolean =>
   typeof navigator !== 'undefined' && navigator.userAgent.includes('Mac')
@@ -69,6 +102,7 @@ export function createState(
       EditorView.lineWrapping,
       viewCompartment.of(viewExtensions(view)),
       modeCompartment.of(modeExtensions(mode)),
+      closingCompartment.of(closingExtensions(false)),
     ],
   })
   const range = headerHiddenInit || mode === 'present' ? frontmatterRange(state.doc) : null

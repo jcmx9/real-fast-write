@@ -11,6 +11,12 @@ export interface NoteFile {
   hash: string
 }
 
+/** What the watcher reports for an open note that changed on disk. */
+export type ExternalChange =
+  | { kind: 'changed'; note: NoteFile }
+  | { kind: 'unreadable'; path: string; reason: 'encoding' | 'error'; message: string }
+  | { kind: 'deleted'; path: string }
+
 export interface Settings {
   defaultFolder: string
   snippetFolder: string
@@ -55,7 +61,12 @@ export interface StartupState {
   fonts: FontStatus
 }
 
-export type SaveResult = { ok: true; hash: string } | { ok: false; error: string }
+export type SaveResult =
+  /** path: the note's canonical path when it differs from the one passed (renamed outside). */
+  | { ok: true; hash: string; path?: string }
+  | { ok: false; error: string }
+  /** Refused without writing: the file changed outside since the tab's base (path: see ok). */
+  | { ok: false; conflict: ExternalChange; path?: string }
 export type RenameResult = { ok: true; path: string } | { ok: false; error: string }
 export type ExportResult =
   | { kind: 'ok'; message: string }
@@ -91,7 +102,17 @@ export interface RfwApi {
   readNote(path: string): Promise<NoteFile | { error: string }>
   newNotePath(): Promise<string>
   releasePath(path: string): Promise<void>
-  saveNote(path: string, text: string, bom: boolean): Promise<SaveResult>
+  /**
+   * base: hash of the bytes the tab last loaded or saved (null for a note not on disk yet);
+   * force: the user chose to overwrite whatever is on disk.
+   */
+  saveNote(
+    path: string,
+    text: string,
+    bom: boolean,
+    base: string | null,
+    force: boolean,
+  ): Promise<SaveResult>
   renameNote(from: string, newName: string): Promise<RenameResult>
   showOpenDialog(): Promise<string[]>
   exportPdf(path: string): Promise<ExportResult>
@@ -100,12 +121,14 @@ export interface RfwApi {
   confirmDiscard(names: string[]): Promise<boolean>
   onMenu(cb: (cmd: MenuCommand) => void): void
   onOpenPaths(cb: (paths: string[]) => void): void
-  onExternalChange(cb: (note: NoteFile) => void): void
+  onExternalChange(cb: (change: ExternalChange) => void): void
   /** cb resolves true when the window may close. */
   onBeforeClose(cb: () => Promise<boolean>): void
   /** Resolves to whether the user (not the app) had the window fullscreen before the change. */
   setFullScreen(on: boolean): Promise<boolean>
   onFullScreenLeft(cb: () => void): void
+  /** The OS did not enter the fullscreen the app requested; Present continues windowed. */
+  onFullScreenRefused(cb: () => void): void
   listSnippets(): Promise<SnippetDef[]>
 }
 

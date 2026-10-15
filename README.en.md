@@ -13,7 +13,7 @@
 
 ## Status
 
-In development. Available: tabs, autosave with atomic writes, rename, session restore, detection of external changes and PDF export via rf-document, and the PDF look in the preview. Presentation mode (fullscreen, larger text, info line) and snippets are available. Not yet available: one-line installation.
+In development. Available: tabs, autosave with atomic writes, rename, session restore, detection of external changes (including deleted or unreadable notes, never silently overwritten) and PDF export via rf-document, and the PDF look in the preview. Presentation mode (fullscreen, larger text, info line) and snippets are available. Not yet available: one-line installation.
 
 ## Prerequisites (development)
 
@@ -29,6 +29,8 @@ rf-write note.md         # open a file (as a tab in a running instance)
 rf-write --version
 rf-write --help
 ```
+
+Symbolic links to single notes open the linked file (tab name, rename and export refer to it); linked folders are not affected.
 
 The `rf-write` command is available after installation (a one-line installer is planned); in development, `npm run dev` starts the app. Settings live in `settings.json` in the app data folder (macOS `~/Library/Application Support/rf-write`, Windows `%APPDATA%\rf-write`, Linux `~/.config/rf-write`).
 
@@ -80,7 +82,7 @@ Own snippets are files `name.tpl.md` in the snippet folder (default `~/Documents
 git clone git@github.com:jcmx9/real-fast-write.git
 cd real-fast-write
 npm ci
-npm run dev                       # app with hot reload
+npm run dev                       # app with hot reload  (macOS: menu bar shows "rf-write", via postinstall)
 npm run lint && npm run typecheck
 npm test                          # unit tests (Vitest)
 npx vitest run tests/unit/main/files.test.ts   # single test file

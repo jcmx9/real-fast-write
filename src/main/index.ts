@@ -30,16 +30,16 @@ function isPathsData(data: unknown): data is { paths: string[] } {
 
 function run(initial: string[]): void {
   const ctx = new AppContext(app.getPath('userData'), app.getPath('documents'))
-  ctx.openPaths(initial)
+  // openPaths canonicalises every path before allowing it or sending it to the renderer.
+  const open = (paths: readonly string[]) => void ctx.openPaths(paths).catch(() => undefined)
+  open(initial)
 
   app.on('open-file', (event, path) => {
     event.preventDefault()
-    ctx.openPaths([path])
+    open([path])
   })
   app.on('second-instance', (_event, _argv, _cwd, data) => {
-    ctx.openPaths(
-      isPathsData(data) ? data.paths.filter((p): p is string => typeof p === 'string') : [],
-    )
+    open(isPathsData(data) ? data.paths.filter((p): p is string => typeof p === 'string') : [])
     ctx.focus()
   })
   app.on('before-quit', () => ctx.markQuitting())

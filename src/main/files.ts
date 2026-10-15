@@ -1,10 +1,11 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { promises as fs } from 'node:fs'
-import { basename, dirname, join } from 'node:path'
-import type { Eol, NoteFile } from '../shared/types'
+import { basename, dirname, join, resolve } from 'node:path'
+import type { Eol, ExternalChange, NoteFile } from '../shared/types'
 
 const BOM = '\uFEFF'
-const RETRY_CODES = new Set(['EPERM', 'EBUSY', 'EACCES'])
+/** Codes that are often transient on Windows (AV scanners, sync clients, delete pending). */
+export const RETRY_CODES: ReadonlySet<string> = new Set(['EPERM', 'EBUSY', 'EACCES'])
 const MAX_RETRIES = 5
 const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
 
@@ -38,6 +39,33 @@ export async function exists(path: string): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+/**
+ * The one spelling of a path that the allowlist, the watcher, tab identity and the session use.
+ * `fs.promises.realpath` is the native realpath: it resolves symlinks and junctions, Windows 8.3
+ * names and, on macOS/Windows, the file system's stored case. A symlinked file resolves to its
+ * target. For a missing path (a new note, maybe in a folder not created yet) the nearest
+ * existing ancestor is canonicalised and the missing rest appended unchanged.
+ */
+export async function canonicalPath(path: string): Promise<string> {
+  const abs = resolve(path)
+  const rest: string[] = []
+  for (let current = abs; ; ) {
+    try {
+      return join(await fs.realpath(current), ...rest)
+    } catch {
+      const parent = dirname(current)
+      if (parent === current) return abs
+      rest.unshift(basename(current))
+      current = parent
+    }
+  }
+}
+
+/** Canonicalises and drops later duplicates, keeping the first occurrence's order. */
+export async function canonicalPaths(paths: readonly string[]): Promise<string[]> {
+  return [...new Set(await Promise.all(paths.map(canonicalPath)))]
 }
 
 export function timestampName(now: Date): string {
@@ -78,7 +106,11 @@ export function noteBytes(text: string, bom: boolean): Buffer {
 }
 
 export async function readNote(path: string): Promise<NoteFile> {
-  const bytes = await fs.readFile(path)
+  return decodeNote(path, await fs.readFile(path))
+}
+
+/** Decodes bytes read from `path`; throws `NotUtf8Error` for invalid UTF-8. */
+export function decodeNote(path: string, bytes: Uint8Array): NoteFile {
   let raw: string
   try {
     raw = decoder.decode(bytes)
@@ -90,11 +122,16 @@ export async function readNote(path: string): Promise<NoteFile> {
   return { path, text, bom, eol: detectEol(text), hash: hashBytes(bytes) }
 }
 
-/** Writes via temp file + fsync + rename; never leaves a half-written target. */
+/**
+ * Writes via temp file + fsync + rename; never leaves a half-written target.
+ * `beforeRename` runs after the temp file is complete and right before the rename, so a check
+ * of the target there is as close to the replace as possible; if it throws, nothing is replaced.
+ */
 export async function writeFileAtomic(
   path: string,
   data: Uint8Array,
   deps: AtomicDeps = defaultDeps,
+  beforeRename?: () => Promise<void>,
 ): Promise<void> {
   const tmp = join(dirname(path), `.${basename(path)}.${randomBytes(6).toString('hex')}.tmp`)
   const mode = await fs.stat(path).then(
@@ -112,6 +149,7 @@ export async function writeFileAtomic(
     throw err
   }
   try {
+    await beforeRename?.()
     for (let attempt = 0; ; attempt++) {
       try {
         await deps.rename(tmp, path)
@@ -137,8 +175,71 @@ async function realTarget(path: string): Promise<string> {
   }
 }
 
-export async function writeNoteBytes(path: string, bytes: Uint8Array): Promise<void> {
-  await writeFileAtomic(await realTarget(path), bytes)
+export async function writeNoteBytes(
+  path: string,
+  bytes: Uint8Array,
+  beforeRename?: () => Promise<void>,
+): Promise<void> {
+  await writeFileAtomic(await realTarget(path), bytes, defaultDeps, beforeRename)
+}
+
+/** Reads once more after a short pause when a lock (AV scanner, sync client) is likely. */
+async function readRetryingOnce(
+  path: string,
+  read: (path: string) => Promise<Buffer>,
+  sleep: AtomicDeps['sleep'],
+): Promise<Buffer> {
+  try {
+    return await read(path)
+  } catch (err) {
+    const code = errorCode(err)
+    if (code === undefined || !RETRY_CODES.has(code)) throw err
+    await sleep(100)
+    return read(path)
+  }
+}
+
+/** What is on disk now, if it is not the content a save was based on. */
+export interface DiskConflict {
+  change: ExternalChange
+  /** Hash of the bytes found; absent when the file is missing. */
+  hash?: string
+}
+
+/**
+ * Compares the bytes at `path` with the hash the caller's content is based on (`null`: a new
+ * note whose file must not exist yet). Returns null when they match or `isOwn` recognises the
+ * bytes as rf-write's own; else the disk state as an external change. A missing file with a base
+ * counts as deleted. Read errors other than ENOENT are thrown: nothing is written over bytes
+ * that could not be compared.
+ */
+export async function diskConflict(
+  path: string,
+  base: string | null,
+  isOwn: (hash: string) => boolean,
+  deps: {
+    read: (path: string) => Promise<Buffer>
+    sleep: AtomicDeps['sleep']
+  } = { read: (p) => fs.readFile(p), sleep: defaultDeps.sleep },
+): Promise<DiskConflict | null> {
+  let bytes: Buffer
+  try {
+    bytes = await readRetryingOnce(path, deps.read, deps.sleep)
+  } catch (err) {
+    if (errorCode(err) !== 'ENOENT') throw err
+    return base === null ? null : { change: { kind: 'deleted', path } }
+  }
+  const hash = hashBytes(bytes)
+  if (hash === base || isOwn(hash)) return null
+  try {
+    return { change: { kind: 'changed', note: decodeNote(path, bytes) }, hash }
+  } catch (err) {
+    if (!(err instanceof NotUtf8Error)) throw err
+    return {
+      change: { kind: 'unreadable', path, reason: 'encoding', message: err.message },
+      hash,
+    }
+  }
 }
 
 export async function writeNote(path: string, text: string, bom: boolean): Promise<string> {
@@ -176,9 +277,14 @@ async function isFree(path: string): Promise<boolean> {
   }
 }
 
-async function sameFile(a: string, b: string): Promise<boolean> {
-  const [sa, sb] = await Promise.all([fs.stat(a, { bigint: true }), fs.stat(b, { bigint: true })])
-  return sa.ino === sb.ino && sa.dev === sb.dev
+/** Both paths name the same existing file (same device and inode); false if either is missing. */
+export async function sameFile(a: string, b: string): Promise<boolean> {
+  try {
+    const [sa, sb] = await Promise.all([fs.stat(a, { bigint: true }), fs.stat(b, { bigint: true })])
+    return sa.ino === sb.ino && sa.dev === sb.dev
+  } catch {
+    return false
+  }
 }
 
 async function unlinkWithRetry(path: string, sleep: AtomicDeps['sleep']): Promise<void> {
@@ -208,7 +314,7 @@ export async function renameNote(
   if (to.toLowerCase() === from.toLowerCase()) {
     // Case-only rename: `to` may be the same file on a case-insensitive FS.
     // If sameFile cannot prove identity, refuse.
-    if (!(await isFree(to)) && !(await sameFile(from, to).catch(() => false))) throw taken()
+    if (!(await isFree(to)) && !(await sameFile(from, to))) throw taken()
     await fs.rename(from, to)
     return to
   }

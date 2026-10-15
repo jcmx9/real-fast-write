@@ -1,10 +1,12 @@
 import {
   chmod,
   lstat,
+  mkdir,
   mkdtemp,
   readdir,
   readFile,
   readlink,
+  realpath,
   stat,
   symlink,
   writeFile,
@@ -13,7 +15,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
+  canonicalPath,
   detectEol,
+  diskConflict,
   hashBytes,
   NotUtf8Error,
   newNotePath,
@@ -153,5 +157,169 @@ describe('writeFileAtomic', () => {
     ).rejects.toThrow('io')
     expect(await readFile(path, 'utf8')).toBe('original')
     expect(await readdir(dir)).toEqual(['orig.md'])
+  })
+})
+
+describe('writeFileAtomic beforeRename', () => {
+  it('runs after the temp file is complete, right before the rename', async () => {
+    const path = join(dir, 'check.md')
+    await writeFile(path, 'alt')
+    let seen: { target: string; temp: string } | null = null
+    await writeFileAtomic(path, noteBytes('neu', false), undefined, async () => {
+      const temp = (await readdir(dir)).find((n) => n.endsWith('.tmp'))
+      seen = {
+        target: await readFile(path, 'utf8'),
+        temp: temp ? await readFile(join(dir, temp), 'utf8') : '',
+      }
+    })
+    expect(seen).toEqual({ target: 'alt', temp: 'neu' })
+    expect(await readFile(path, 'utf8')).toBe('neu')
+  })
+
+  it('replaces nothing and removes the temp file when it throws', async () => {
+    const path = join(dir, 'refused.md')
+    await writeFile(path, 'extern')
+    await expect(
+      writeFileAtomic(path, noteBytes('neu', false), undefined, async () => {
+        throw new Error('conflict')
+      }),
+    ).rejects.toThrow('conflict')
+    expect(await readFile(path, 'utf8')).toBe('extern')
+    expect(await readdir(dir)).toEqual(['refused.md'])
+  })
+})
+
+describe('diskConflict', () => {
+  const never = () => false
+
+  it('is null when the bytes match the base', async () => {
+    const path = join(dir, 'a.md')
+    await writeFile(path, 'x')
+    expect(await diskConflict(path, hashBytes(Buffer.from('x')), never)).toBeNull()
+  })
+
+  it('is null when the bytes are our own', async () => {
+    const path = join(dir, 'a.md')
+    await writeFile(path, 'x')
+    const own = hashBytes(Buffer.from('x'))
+    expect(await diskConflict(path, 'alt', (h) => h === own)).toBeNull()
+  })
+
+  it('is null for a missing file without base, deleted with base', async () => {
+    const path = join(dir, 'fehlt.md')
+    expect(await diskConflict(path, null, never)).toBeNull()
+    expect(await diskConflict(path, 'alt', never)).toEqual({
+      change: { kind: 'deleted', path },
+    })
+  })
+
+  it('returns changed content with its hash', async () => {
+    const path = join(dir, 'a.md')
+    await writeFile(path, 'neu')
+    const res = await diskConflict(path, 'alt', never)
+    expect(res?.hash).toBe(hashBytes(Buffer.from('neu')))
+    expect(res?.change).toMatchObject({ kind: 'changed', note: { text: 'neu' } })
+  })
+
+  it('returns invalid UTF-8 as unreadable', async () => {
+    const path = join(dir, 'a.md')
+    await writeFile(path, Buffer.from([0xfc]))
+    const res = await diskConflict(path, 'alt', never)
+    expect(res?.change).toMatchObject({ kind: 'unreadable', reason: 'encoding' })
+  })
+
+  it.each(['EPERM', 'EBUSY', 'EACCES'])('reads once more after a transient %s', async (code) => {
+    const path = join(dir, 'a.md')
+    let calls = 0
+    const read = async (p: string) => {
+      calls++
+      if (calls === 1) throw Object.assign(new Error(code), { code })
+      return readFile(p)
+    }
+    await writeFile(path, 'x')
+    const res = await diskConflict(path, hashBytes(Buffer.from('x')), never, {
+      read,
+      sleep: async () => undefined,
+    })
+    expect(res).toBeNull()
+    expect(calls).toBe(2)
+  })
+
+  it('throws when the transient error lasts', async () => {
+    const path = join(dir, 'a.md')
+    let calls = 0
+    const read = async () => {
+      calls++
+      throw Object.assign(new Error('busy'), { code: 'EBUSY' })
+    }
+    await expect(
+      diskConflict(path, 'alt', never, { read, sleep: async () => undefined }),
+    ).rejects.toMatchObject({ code: 'EBUSY' })
+    expect(calls).toBe(2)
+  })
+
+  posixOnly('throws other read errors', async () => {
+    if (process.getuid?.() === 0) return
+    const path = join(dir, 'a.md')
+    await writeFile(path, 'x')
+    await chmod(path, 0o000)
+    try {
+      await expect(diskConflict(path, 'alt', never)).rejects.toMatchObject({ code: 'EACCES' })
+    } finally {
+      await chmod(path, 0o644)
+    }
+  })
+})
+
+/** True when the folder treats `a.md` and `A.md` as the same file (macOS/Windows defaults). */
+async function caseInsensitive(folder: string): Promise<boolean> {
+  await writeFile(join(folder, 'probe-case.md'), '')
+  return stat(join(folder, 'PROBE-CASE.md')).then(
+    () => true,
+    () => false,
+  )
+}
+
+describe('canonicalPath', () => {
+  /** A real folder plus a link to it; junctions need no admin rights on Windows. */
+  async function linkedFolder(): Promise<{ real: string; link: string }> {
+    const real = join(await realpath(dir), 'echt')
+    await mkdir(real)
+    const link = join(dir, 'verknuepft')
+    await symlink(real, link, 'junction')
+    return { real, link }
+  }
+
+  it('gives the same path for a symlinked folder and the direct folder', async () => {
+    const { real, link } = await linkedFolder()
+    await writeFile(join(real, 'a.md'), 'x')
+    const direct = await canonicalPath(join(real, 'a.md'))
+    expect(await canonicalPath(join(link, 'a.md'))).toBe(direct)
+    expect(direct).toBe(join(real, 'a.md'))
+  })
+
+  it('resolves relative segments of an existing file', async () => {
+    const { real } = await linkedFolder()
+    await writeFile(join(real, 'a.md'), 'x')
+    expect(await canonicalPath(join(real, '..', 'echt', 'a.md'))).toBe(join(real, 'a.md'))
+  })
+
+  it('returns the stored case on a case-insensitive volume', async (t) => {
+    const base = await realpath(dir)
+    if (!(await caseInsensitive(base))) t.skip()
+    await writeFile(join(base, 'a.md'), 'x')
+    expect(await canonicalPath(join(base, 'A.MD'))).toBe(join(base, 'a.md'))
+  })
+
+  it('canonicalises the folder of a missing new note', async () => {
+    const { real, link } = await linkedFolder()
+    expect(await canonicalPath(join(link, 'neu.md'))).toBe(join(real, 'neu.md'))
+  })
+
+  it('canonicalises the nearest existing folder of a path in missing folders', async () => {
+    const { real, link } = await linkedFolder()
+    const missing = join(link, 'fehlt', 'tief', 'neu.md')
+    expect(await canonicalPath(missing)).toBe(join(real, 'fehlt', 'tief', 'neu.md'))
+    expect(await readdir(real)).toEqual([])
   })
 })

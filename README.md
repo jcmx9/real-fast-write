@@ -13,7 +13,7 @@
 
 ## Status
 
-In Entwicklung. Vorhanden: Tabs, Autosave mit atomarem Schreiben, Umbenennen, Wiederherstellen der Sitzung, Erkennen externer Änderungen und PDF-Export über rf-document sowie die PDF-Optik in der Vorschau. Der Präsentationsmodus (Vollbild, größerer Text, Infozeile) und Snippets sind verfügbar. Noch nicht vorhanden: die Installation per Einzeiler.
+In Entwicklung. Vorhanden: Tabs, Autosave mit atomarem Schreiben, Umbenennen, Wiederherstellen der Sitzung, Erkennen externer Änderungen (auch gelöschte oder nicht lesbare Notizen, ohne stilles Überschreiben) und PDF-Export über rf-document sowie die PDF-Optik in der Vorschau. Der Präsentationsmodus (Vollbild, größerer Text, Infozeile) und Snippets sind verfügbar. Noch nicht vorhanden: die Installation per Einzeiler.
 
 ## Voraussetzungen (Entwicklung)
 
@@ -29,6 +29,8 @@ rf-write notiz.md        # Datei öffnen (bei laufender Instanz als Tab)
 rf-write --version
 rf-write --help
 ```
+
+Symbolische Links auf einzelne Notizen öffnen die verlinkte Datei (Tab-Name, Umbenennen und Export beziehen sich auf sie); verlinkte Ordner sind davon nicht betroffen.
 
 Der Befehl `rf-write` steht nach der Installation zur Verfügung (ein One-Line-Installer ist geplant); in der Entwicklung startet `npm run dev` die App. Die Einstellungen liegen in `settings.json` im App-Datenordner (macOS `~/Library/Application Support/rf-write`, Windows `%APPDATA%\rf-write`, Linux `~/.config/rf-write`).
 
@@ -80,7 +82,7 @@ Eigene Snippets sind Dateien `name.tpl.md` im Snippet-Ordner (Standard `~/Docume
 git clone git@github.com:jcmx9/real-fast-write.git
 cd real-fast-write
 npm ci
-npm run dev                       # App mit Hot Reload
+npm run dev                       # App mit Hot Reload  (macOS: Menüleiste zeigt "rf-write", per postinstall)
 npm run lint && npm run typecheck
 npm test                          # Unit-Tests (Vitest)
 npx vitest run tests/unit/main/files.test.ts   # einzelne Testdatei

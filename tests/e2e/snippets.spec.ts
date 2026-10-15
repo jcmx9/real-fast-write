@@ -1,7 +1,7 @@
 import { mkdir, readdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { expect, type Page, test } from '@playwright/test'
-import { clickMenu, launch, MOD, makeDirs, waitForFile } from './helpers'
+import { expect, type Page } from '@playwright/test'
+import { clickMenu, launch, MOD, makeDirs, test, waitForFile } from './helpers'
 
 const today = () => {
   const d = new Date()
