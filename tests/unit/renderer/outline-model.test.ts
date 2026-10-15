@@ -35,6 +35,25 @@ describe('outlineEntries', () => {
     expect(a?.fold).not.toBeNull()
     expect(a?.from).toBe(0)
   })
+  it('only top-level headings count; quotes, lists and #hashtags do not', () => {
+    expect(flat('> # Q\n\n- # L\n\n#hashtag\n\n# Real\n')).toEqual([[1, 'Real', []]])
+  })
+  it('multi-line Setext heading shows its full text on one line', () => {
+    expect(flat('line one\nline two\n===\n')).toEqual([[1, 'line one line two', []]])
+  })
+  it('a folded H1 keeps its children with their own fold state', () => {
+    let state = st('# A\nx\n## a1\ny\n## a2\n')
+    const [a] = outlineEntries(state)
+    state = state.update({
+      effects: [foldEffect.of(a?.fold as { from: number; to: number })],
+    }).state
+    const [folded] = outlineEntries(state)
+    expect(folded?.folded).toBe(true)
+    expect(folded?.children.map((c) => [c.text, c.folded, c.fold !== null])).toEqual([
+      ['a1', false, true],
+      ['a2', false, false],
+    ])
+  })
   it('empty heading text', () => {
     expect(flat('#\n')).toEqual([[1, '(ohne Titel)', []]])
   })
