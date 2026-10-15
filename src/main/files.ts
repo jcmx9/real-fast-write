@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { promises as fs } from 'node:fs'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import type { Eol, NoteFile } from '../shared/types'
 
 const BOM = '\uFEFF'
@@ -38,6 +38,30 @@ export async function exists(path: string): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+/**
+ * The one spelling of a path that the allowlist, the watcher, tab identity and the session use.
+ * `fs.promises.realpath` is the native realpath: it resolves symlinks and junctions, Windows 8.3
+ * names and, on macOS/Windows, the file system's stored case. A missing file (a new note) gets
+ * its folder canonicalised; a path in a missing folder is only resolved.
+ */
+export async function canonicalPath(path: string): Promise<string> {
+  const abs = resolve(path)
+  try {
+    return await fs.realpath(abs)
+  } catch {
+    try {
+      return join(await fs.realpath(dirname(abs)), basename(abs))
+    } catch {
+      return abs
+    }
+  }
+}
+
+/** Canonicalises and drops later duplicates, keeping the first occurrence's order. */
+export async function canonicalPaths(paths: readonly string[]): Promise<string[]> {
+  return [...new Set(await Promise.all(paths.map(canonicalPath)))]
 }
 
 export function timestampName(now: Date): string {

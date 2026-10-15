@@ -8,11 +8,13 @@ import type {
   MenuCommand,
   Session,
   SessionPatch,
+  SessionTab,
   Settings,
   StartupState,
 } from '../shared/types'
 import { addRecent, replaceRecent } from './cli'
 import { runRfDocument } from './export'
+import { canonicalPath, canonicalPaths } from './files'
 import { fontDir, fontStatus } from './fonts'
 import { FullScreenOwner } from './fullscreen'
 import { isExecutableFile, locateRfDocument } from './locate'
@@ -49,6 +51,9 @@ export class AppContext {
   private quitting = false
   private initialized = false
   private sessionWrite: Promise<void> = Promise.resolve()
+  /** Keeps async canonicalisation from reordering openPaths/updateSession calls. */
+  private openQueue: Promise<void> = Promise.resolve()
+  private sessionQueue: Promise<void> = Promise.resolve()
   private rfDocument: string | null = null
 
   constructor(
@@ -60,21 +65,28 @@ export class AppContext {
 
   async load(): Promise<void> {
     this.settings = sanitizeSettings(await loadJson(this.file('settings.json')), this.settings)
-    this.session = sanitizeSession(await loadJson(this.file('session.json')))
+    const raw = sanitizeSession(await loadJson(this.file('session.json')))
+    const restored = await canonicalTabs(raw.tabs, raw.activeIndex)
+    this.session = { ...raw, ...restored, recent: await canonicalPaths(raw.recent) }
     this.allow([...this.session.tabs.map((t) => t.path), ...this.session.recent])
     this.fonts = await fontStatus(fontDir(process.platform, process.env, homedir()))
   }
 
+  /** Adds paths that are already canonical (see `canonicalPath`). */
   allow(paths: readonly string[]): void {
     for (const p of paths) this.allowed.add(p)
   }
 
+  /** Exact lookup of a canonical path. */
   isAllowed(path: string): boolean {
     return this.allowed.has(path)
   }
 
-  assertAllowed(path: string): void {
-    if (!this.allowed.has(path)) throw new Error(`Zugriff verweigert: ${path}`)
+  /** Canonicalises `path` and returns the canonical form if it is allowed, else throws. */
+  async assertAllowed(path: string): Promise<string> {
+    const canonical = await canonicalPath(path)
+    if (!this.allowed.has(canonical)) throw new Error(`Zugriff verweigert: ${path}`)
+    return canonical
   }
 
   createWindow(): void {
@@ -128,15 +140,23 @@ export class AppContext {
     return this.initialized
   }
 
-  /** Opens paths in the renderer now, or queues them until it has started. */
-  openPaths(paths: readonly string[]): void {
-    if (!paths.length) return
-    this.allow(paths)
-    if (this.window && this.rendererReady) this.send(Ch.openPaths, [...paths])
-    else {
-      this.pending.push(...paths)
-      if (!this.window && this.initialized) this.createWindow()
-    }
+  /**
+   * Opens paths in the renderer now, or queues them until it has started. Paths are
+   * canonicalised first, so two spellings of one file open one tab.
+   */
+  openPaths(paths: readonly string[]): Promise<void> {
+    const run = this.openQueue.then(async () => {
+      if (!paths.length) return
+      const canonical = await canonicalPaths(paths)
+      this.allow(canonical)
+      if (this.window && this.rendererReady) this.send(Ch.openPaths, canonical)
+      else {
+        this.pending.push(...canonical.filter((p) => !this.pending.includes(p)))
+        if (!this.window && this.initialized) this.createWindow()
+      }
+    })
+    this.openQueue = run.catch((err) => console.error('rf-write: Öffnen fehlgeschlagen', err))
+    return run
   }
 
   focus(): void {
@@ -173,7 +193,7 @@ export class AppContext {
       isDev: !app.isPackaged,
       recent: this.session.recent,
       command: (c: MenuCommand) => this.send(Ch.menu, c),
-      openRecent: (p) => this.openPaths([p]),
+      openRecent: (p) => void this.openPaths([p]).catch(() => undefined),
       clearRecent: () => void this.setRecent([]).catch(logSessionError),
     })
     Menu.setApplicationMenu(Menu.buildFromTemplate(template))
@@ -187,12 +207,27 @@ export class AppContext {
     await this.setRecent(replaceRecent(this.session.recent, from, to))
   }
 
-  async updateSession(patch: SessionPatch): Promise<void> {
-    const tabs = patch.tabs?.filter((t) => this.isAllowed(t.path))
+  updateSession(patch: SessionPatch): Promise<void> {
+    const run = this.sessionQueue.then(() => this.applySessionPatch(patch))
+    this.sessionQueue = run.catch(() => undefined)
+    return run
+  }
+
+  private async applySessionPatch(patch: SessionPatch): Promise<void> {
+    // Sanitize first: the patch comes from the renderer and may be malformed.
+    const clean = sanitizeSession({ tabs: patch.tabs, activeIndex: patch.activeIndex })
+    const canonical = patch.tabs ? await canonicalTabs(clean.tabs, clean.activeIndex) : null
     // Copy only whitelisted keys: the renderer must never set e.g. `recent`.
     const next: Record<string, unknown> = { ...this.session }
-    if (tabs) next.tabs = tabs
-    if (patch.activeIndex !== undefined) next.activeIndex = patch.activeIndex
+    if (canonical) {
+      const kept = canonical.tabs.filter((t) => this.isAllowed(t.path))
+      const active = canonical.tabs[canonical.activeIndex]?.path
+      next.tabs = kept
+      next.activeIndex = Math.max(
+        0,
+        kept.findIndex((t) => t.path === active),
+      )
+    } else if (patch.activeIndex !== undefined) next.activeIndex = patch.activeIndex
     if (patch.mode !== undefined) next.mode = patch.mode
     if (patch.view !== undefined) next.view = patch.view
     if (patch.zoom !== undefined) next.zoom = patch.zoom
@@ -255,4 +290,25 @@ export class AppContext {
   private file(name: string): string {
     return join(this.userData, name)
   }
+}
+
+/**
+ * Canonicalises tab paths and drops later duplicates (the first keeps its `headerHidden`);
+ * the active index follows its tab.
+ */
+async function canonicalTabs(
+  tabs: readonly SessionTab[],
+  activeIndex: number,
+): Promise<{ tabs: SessionTab[]; activeIndex: number }> {
+  const paths = await Promise.all(tabs.map((t) => canonicalPath(t.path)))
+  const out: SessionTab[] = []
+  const index = new Map<string, number>()
+  paths.forEach((path, i) => {
+    if (!index.has(path)) {
+      index.set(path, out.length)
+      out.push({ path, headerHidden: tabs[i]?.headerHidden === true })
+    }
+  })
+  const active = paths[activeIndex]
+  return { tabs: out, activeIndex: active === undefined ? 0 : (index.get(active) ?? 0) }
 }

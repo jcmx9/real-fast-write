@@ -2,7 +2,16 @@ import { BrowserWindow, dialog, ipcMain } from 'electron'
 import { Ch } from '../shared/ipc'
 import type { NoteFile, RenameResult, SaveResult, SessionPatch } from '../shared/types'
 import { type AppContext, logSessionError } from './context'
-import { hashBytes, newNotePath, noteBytes, readNote, renameNote, writeNoteBytes } from './files'
+import {
+  canonicalPath,
+  canonicalPaths,
+  hashBytes,
+  newNotePath,
+  noteBytes,
+  readNote,
+  renameNote,
+  writeNoteBytes,
+} from './files'
 import { loadUserSnippets } from './snippets'
 
 const str = (v: unknown): string => {
@@ -33,8 +42,7 @@ export function registerIpc(ctx: AppContext): void {
 
   ipcMain.handle(Ch.readNote, async (_e, path: unknown): Promise<NoteFile | { error: string }> => {
     try {
-      const p = str(path)
-      ctx.assertAllowed(p)
+      const p = await ctx.assertAllowed(str(path))
       const note = await readNote(p)
       ctx.watcher.expect(p, note.hash)
       void ctx.rememberRecent(p).catch(logSessionError)
@@ -45,22 +53,24 @@ export function registerIpc(ctx: AppContext): void {
   })
 
   ipcMain.handle(Ch.newNotePath, async () => {
-    const p = await newNotePath(ctx.settings.defaultFolder, new Date(), ctx.reserved)
+    // Canonical folder, so candidates compare against the canonical reserved set; the result is
+    // canonicalised again in case the folder was only created (and resolved) by newNotePath.
+    const dir = await canonicalPath(ctx.settings.defaultFolder)
+    const p = await canonicalPath(await newNotePath(dir, new Date(), ctx.reserved))
     ctx.reserved.add(p)
     ctx.allow([p])
     return p
   })
 
-  ipcMain.handle(Ch.releasePath, (_e, path: unknown) => {
-    ctx.reserved.delete(str(path))
+  ipcMain.handle(Ch.releasePath, async (_e, path: unknown) => {
+    ctx.reserved.delete(await canonicalPath(str(path)))
   })
 
   ipcMain.handle(
     Ch.saveNote,
     async (_e, path: unknown, text: unknown, bom: unknown): Promise<SaveResult> => {
       try {
-        const p = str(path)
-        ctx.assertAllowed(p)
+        const p = await ctx.assertAllowed(str(path))
         const bytes = noteBytes(str(text), bom === true)
         const hash = hashBytes(bytes)
         ctx.watcher.expect(p, hash)
@@ -77,9 +87,8 @@ export function registerIpc(ctx: AppContext): void {
     Ch.renameNote,
     async (_e, from: unknown, newName: unknown): Promise<RenameResult> => {
       try {
-        const p = str(from)
-        ctx.assertAllowed(p)
-        const to = await renameNote(p, str(newName))
+        const p = await ctx.assertAllowed(str(from))
+        const to = await canonicalPath(await renameNote(p, str(newName)))
         ctx.allow([to])
         await ctx.renamedRecent(p, to)
         return { ok: true, path: to }
@@ -99,23 +108,23 @@ export function registerIpc(ctx: AppContext): void {
     const result = win
       ? await dialog.showOpenDialog(win, options)
       : await dialog.showOpenDialog(options)
-    ctx.allow(result.filePaths)
-    return result.filePaths
+    const paths = await canonicalPaths(result.filePaths)
+    ctx.allow(paths)
+    return paths
   })
 
   ipcMain.handle(Ch.exportPdf, async (_e, path: unknown) => {
-    const p = str(path)
-    ctx.assertAllowed(p)
-    return ctx.exportPdf(p)
+    return ctx.exportPdf(await ctx.assertAllowed(str(path)))
   })
 
   ipcMain.handle(Ch.saveSession, async (_e, patch: unknown) => {
     if (typeof patch === 'object' && patch !== null) await ctx.updateSession(patch as SessionPatch)
   })
 
-  ipcMain.handle(Ch.watch, (_e, paths: unknown) => {
+  ipcMain.handle(Ch.watch, async (_e, paths: unknown) => {
     const list = Array.isArray(paths) ? paths.filter((p): p is string => typeof p === 'string') : []
-    ctx.watcher.setFiles(list.filter((p) => ctx.isAllowed(p)))
+    const canonical = await canonicalPaths(list)
+    ctx.watcher.setFiles(canonical.filter((p) => ctx.isAllowed(p)))
   })
 
   ipcMain.handle(Ch.confirmDiscard, (_e, names: unknown) =>

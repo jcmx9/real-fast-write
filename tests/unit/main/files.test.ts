@@ -1,10 +1,12 @@
 import {
   chmod,
   lstat,
+  mkdir,
   mkdtemp,
   readdir,
   readFile,
   readlink,
+  realpath,
   stat,
   symlink,
   writeFile,
@@ -13,6 +15,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
+  canonicalPath,
   detectEol,
   hashBytes,
   NotUtf8Error,
@@ -153,5 +156,57 @@ describe('writeFileAtomic', () => {
     ).rejects.toThrow('io')
     expect(await readFile(path, 'utf8')).toBe('original')
     expect(await readdir(dir)).toEqual(['orig.md'])
+  })
+})
+
+/** True when the folder treats `a.md` and `A.md` as the same file (macOS/Windows defaults). */
+async function caseInsensitive(folder: string): Promise<boolean> {
+  await writeFile(join(folder, 'probe-case.md'), '')
+  return stat(join(folder, 'PROBE-CASE.md')).then(
+    () => true,
+    () => false,
+  )
+}
+
+describe('canonicalPath', () => {
+  /** A real folder plus a link to it; junctions need no admin rights on Windows. */
+  async function linkedFolder(): Promise<{ real: string; link: string }> {
+    const real = join(await realpath(dir), 'echt')
+    await mkdir(real)
+    const link = join(dir, 'verknuepft')
+    await symlink(real, link, 'junction')
+    return { real, link }
+  }
+
+  it('gives the same path for a symlinked folder and the direct folder', async () => {
+    const { real, link } = await linkedFolder()
+    await writeFile(join(real, 'a.md'), 'x')
+    const direct = await canonicalPath(join(real, 'a.md'))
+    expect(await canonicalPath(join(link, 'a.md'))).toBe(direct)
+    expect(direct).toBe(join(real, 'a.md'))
+  })
+
+  it('resolves relative segments of an existing file', async () => {
+    const { real } = await linkedFolder()
+    await writeFile(join(real, 'a.md'), 'x')
+    expect(await canonicalPath(join(real, '..', 'echt', 'a.md'))).toBe(join(real, 'a.md'))
+  })
+
+  it('returns the stored case on a case-insensitive volume', async (t) => {
+    const base = await realpath(dir)
+    if (!(await caseInsensitive(base))) t.skip()
+    await writeFile(join(base, 'a.md'), 'x')
+    expect(await canonicalPath(join(base, 'A.MD'))).toBe(join(base, 'a.md'))
+  })
+
+  it('canonicalises the folder of a missing new note', async () => {
+    const { real, link } = await linkedFolder()
+    expect(await canonicalPath(join(link, 'neu.md'))).toBe(join(real, 'neu.md'))
+  })
+
+  it('resolves a path in a missing folder without touching the disk', async () => {
+    const missing = join(dir, 'fehlt', 'neu.md')
+    expect(await canonicalPath(missing)).toBe(missing)
+    expect(await readdir(dir)).toEqual([])
   })
 })
