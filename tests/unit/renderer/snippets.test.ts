@@ -185,4 +185,18 @@ describe('snippet completion in the editor', () => {
     expect(view.state.doc.toString()).toBe('Hinweis:')
     view.destroy()
   })
+
+  it('Escape with an open list is preventDefault-ed, so Present stays open', async () => {
+    const view = mount(':mee')
+    startCompletion(view)
+    await open(view)
+    const ev = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true, bubbles: true })
+    view.contentDOM.dispatchEvent(ev)
+    expect(ev.defaultPrevented).toBe(true)
+    expect(completionStatus(view.state)).toBeNull()
+    const second = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true, bubbles: true })
+    view.contentDOM.dispatchEvent(second)
+    expect(second.defaultPrevented).toBe(false)
+    view.destroy()
+  })
 })

@@ -8,6 +8,7 @@ import { headerHidden, headerToggleSpec, moveOutOfHeader } from './editor/header
 import { modeCompartment, modeExtensions } from './editor/mode'
 import { foldAllSections } from './editor/sections'
 import { createState, serializeDoc, viewCompartment, viewExtensions } from './editor/setup'
+import { snippetRegistry } from './editor/snippets'
 import { type Tab, TabStore } from './tabs/tab-store'
 import { InfoLine } from './ui/infoline'
 import { Notices } from './ui/notices'
@@ -109,6 +110,15 @@ export class App {
     this.rfw.onBeforeClose(() => this.beforeClose())
     window.addEventListener('keydown', (e) => this.globalKeys(e))
     window.addEventListener('blur', () => void this.autosave.flush())
+    window.addEventListener('focus', () => void this.reloadSnippets())
+  }
+
+  private async reloadSnippets(): Promise<void> {
+    try {
+      snippetRegistry.setUser(await this.rfw.listSnippets())
+    } catch (err) {
+      console.error('rf-write: Snippets konnten nicht geladen werden', err)
+    }
   }
 
   async start(): Promise<void> {
@@ -130,6 +140,7 @@ export class App {
     for (const p of startup.openPaths) await this.openPath(p)
     if (this.store.all.length === 0) await this.newNote()
     else this.show()
+    void this.reloadSnippets()
   }
 
   // ── commands ────────────────────────────────────────────────────────────

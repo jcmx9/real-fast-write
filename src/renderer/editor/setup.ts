@@ -10,7 +10,7 @@ import { headerFold, headerHidden } from './header'
 import { rfHighlight } from './highlight'
 import { modeCompartment, modeExtensions } from './mode'
 import { previewPlugin } from './preview'
-import { foldAllSections } from './sections'
+import { foldAllSections, unfoldOnCursor } from './sections'
 import { snippetExtensions } from './snippets'
 import { tableField } from './tables'
 
@@ -59,6 +59,7 @@ export function createState(
       drawSelection(),
       codeFolding(),
       snippetExtensions,
+      unfoldOnCursor,
       keymap.of([...foldBindings(), ...defaultKeymap, ...historyKeymap, indentWithTab]),
       markdown({ base: markdownLanguage, codeLanguages: languages, extensions: [Frontmatter] }),
       rfHighlight,

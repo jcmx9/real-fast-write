@@ -1,5 +1,12 @@
-import { ensureSyntaxTree, foldable, foldEffect, syntaxTree } from '@codemirror/language'
-import type { EditorState } from '@codemirror/state'
+import {
+  ensureSyntaxTree,
+  foldable,
+  foldEffect,
+  foldedRanges,
+  syntaxTree,
+  unfoldEffect,
+} from '@codemirror/language'
+import { EditorState, type StateEffect } from '@codemirror/state'
 import type { EditorView } from '@codemirror/view'
 
 /** Fold ranges of every heading's section (lang-markdown's header fold service). */
@@ -28,3 +35,22 @@ export function foldAllSections(view: EditorView): boolean {
   view.dispatch({ effects: ranges.map((r) => foldEffect.of(r)) })
   return true
 }
+
+/**
+ * A cursor or selection head that lands strictly inside a folded range unfolds it, so a
+ * tab stop or caret is never hidden. Uses the start state's folds mapped through the
+ * transaction's changes: `tr.state` inside an extender would force a second, throw-away
+ * state computation. The header collapse is a decoration, not a code fold, and is unaffected.
+ */
+export const unfoldOnCursor = EditorState.transactionExtender.of((tr) => {
+  if (!tr.selection && !tr.docChanged) return null
+  const folded = foldedRanges(tr.startState).map(tr.changes)
+  if (folded.size === 0) return null
+  const effects: StateEffect<{ from: number; to: number }>[] = []
+  for (const r of tr.newSelection.ranges) {
+    folded.between(r.from, r.to, (from, to) => {
+      if (r.head > from && r.head < to) effects.push(unfoldEffect.of({ from, to }))
+    })
+  }
+  return effects.length ? { effects } : null
+})
