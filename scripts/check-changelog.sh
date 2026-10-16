@@ -29,4 +29,4 @@ while IFS= read -r version; do
 done < <(sed -n 's/^## \[\([0-9][0-9.]*\)\].*/\1/p' "${changelog}")
 
 [[ "${failed}" -eq 0 ]] || exit "${EXIT_CHANGED}"
-echo "CHANGELOG: ${checked} veröffentlichte Abschnitte unverändert."
+echo "CHANGELOG: veröffentlichte Abschnitte unverändert (geprüft: ${checked})."
