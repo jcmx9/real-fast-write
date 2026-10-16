@@ -10,6 +10,8 @@ files:
   - "package.json"
   - "!**/*.map"
 artifactName: "rf-write-${version}-${os}-${arch}.${ext}"
+# One 1024px PNG (source: resources/icon/icon.svg); electron-builder derives .icns and .ico.
+icon: resources/icon/icon.png
 mac:
   target:
     - target: zip

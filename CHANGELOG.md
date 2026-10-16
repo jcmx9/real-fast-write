@@ -18,6 +18,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - One conflict banner per tab: an outside case-only rename no longer leaves a second, stale banner
 
 ### Added
+- App icon: the mdo logo in white on the accent colour (macOS, Windows, Linux)
 - Packaging with electron-builder and release archives for macOS, Windows and Linux
 - One-line install, update and uninstall (`scripts/bootstrap.sh`, `scripts/bootstrap.ps1`), also for pre-releases (`--pre` / `-Pre`)
 - Settings dialog (folders, rf-document path, Present font factor, header default) with rf-document and font status
