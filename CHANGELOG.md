@@ -15,6 +15,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Closing while typing saves every keystroke or asks
 - Present recovers when the OS refuses fullscreen; fast toggles keep the last intent
 - In Preview, arrow keys and clicks below the title block or a table land on the right line (they skipped every second line when zoomed)
+- One conflict banner per tab: an outside case-only rename no longer leaves a second, stale banner
 
 ### Added
 - Packaging with electron-builder and release archives for macOS, Windows and Linux

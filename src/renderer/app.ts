@@ -55,6 +55,9 @@ const DELETED_ERROR = 'Datei außerhalb gelöscht – bitte im Hinweis entscheid
 
 const MAX_SAVE_ROUNDS = 3
 
+/** One conflict banner per tab: a tab keeps its banner when its path changes (case-only rename). */
+const bannerKey = (tabId: number): string => `tab:${tabId}`
+
 const isMac = navigator.userAgent.includes('Mac')
 
 export interface AppRoot {
@@ -578,7 +581,7 @@ export class App {
       }
     }
     this.store.close(id)
-    this.notices.dismiss(tab.path)
+    this.notices.dismiss(bannerKey(id))
     this.saveErrors.delete(id)
     this.conflicts.delete(id)
     this.unwritten.delete(id)
@@ -803,7 +806,7 @@ export class App {
       // externally, so only lift the hold; unsaved typing is autosaved as usual.
       if (this.unwritten.delete(tab.id)) {
         this.clearConflict(tab.id)
-        this.notices.dismiss(note.path)
+        this.notices.dismiss(bannerKey(tab.id))
         this.refresh()
         this.autosave.touch()
       }
@@ -813,7 +816,7 @@ export class App {
     this.unwritten.delete(tab.id)
     this.holdWarnings.delete(tab.id)
     if (!this.store.isDirty(tab)) {
-      this.notices.dismiss(note.path)
+      this.notices.dismiss(bannerKey(tab.id))
       this.clearConflict(tab.id)
       this.reload(tab, note)
       return
@@ -841,7 +844,7 @@ export class App {
           },
         },
       ],
-      note.path,
+      bannerKey(tab.id),
     )
   }
 
@@ -884,7 +887,7 @@ export class App {
         },
         { label: 'Tab schließen', run: () => void this.closeTab(tab.id, true) },
       ],
-      change.path,
+      bannerKey(tab.id),
       change.kind === 'unreadable' && change.reason === 'error' ? change.message : undefined,
     )
   }
