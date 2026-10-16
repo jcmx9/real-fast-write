@@ -41,4 +41,5 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Code/Preview switch, YAML header that collapses into the PDF title block, section folding (single and all)
 
 ### Changed
+- Outline: H1 in the heading serif, H2 smaller on a hairline guide, quieter chevrons, an accent bar on the current heading
 - Body text is justified without hyphenation on every platform (hyphenation only in the PDF)
