@@ -144,7 +144,13 @@ export class App {
       select: (i) => this.activate(i),
       close: (id) => void this.closeTab(id),
     })
-    this.status = new StatusLine(root.status, { exportPdf: () => void this.exportPdf() })
+    this.status = new StatusLine(root.status, {
+      exportPdf: () => void this.exportPdf(),
+      setMode: (mode) => {
+        if (mode !== this.mode) void this.presentToggle.toggle()
+      },
+      setView: (view) => this.setView(view),
+    })
     this.notices = new Notices(root.notices)
     this.infoLine = new InfoLine(root.infoline, {
       selectTab: (i) => this.activate(i),
@@ -458,6 +464,7 @@ export class App {
     this.view = view
     this.reconfigureAll()
     this.outline.refresh()
+    this.refresh()
     this.syncMain()
     this.editor.focus()
   }
@@ -960,7 +967,7 @@ export class App {
     else if (error) state = 'error'
     else if (tab && this.store.isDirty(tab)) state = 'dirty'
     else if (tab && !tab.onDisk) state = 'new'
-    this.status.render(tab ? fileName(tab.path) : null, state, error)
+    this.status.render(tab ? fileName(tab.path) : null, state, error, this.view)
     document.title = tab
       ? `${fileName(tab.path)}${state === 'dirty' ? ' •' : ''} – rf-write`
       : 'rf-write'

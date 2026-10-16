@@ -1,18 +1,30 @@
 // @vitest-environment happy-dom
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { StatusLine, saveText } from '../../../src/renderer/ui/statusline'
+
+const actions = () => ({ exportPdf: vi.fn(), setMode: vi.fn(), setView: vi.fn() })
+const q = (el: HTMLElement, id: string) =>
+  el.querySelector(`[data-testid=${id}]`) as HTMLButtonElement
+
+beforeEach(() => vi.useFakeTimers())
+afterEach(() => vi.useRealTimers())
 
 describe('status line', () => {
   it('shows a hold with its reason, styled like a failed save', () => {
     const el = document.createElement('div')
-    const status = new StatusLine(el, { exportPdf: () => undefined })
-    status.render('a.md', 'held', 'Datei außerhalb gelöscht – bitte im Hinweis entscheiden')
+    const status = new StatusLine(el, actions())
+    status.render(
+      'a.md',
+      'held',
+      'Datei außerhalb gelöscht – bitte im Hinweis entscheiden',
+      'preview',
+    )
     const state = el.querySelector('[data-testid=status-state]')
     expect(state?.textContent).toBe(
       'Nicht gespeichert: Datei außerhalb gelöscht – bitte im Hinweis entscheiden',
     )
     expect(state?.classList.contains('error')).toBe(true)
-    status.render('a.md', 'saved', null)
+    status.render('a.md', 'saved', null, 'preview')
     expect(state?.textContent).toBe('Gespeichert')
     expect(state?.classList.contains('error')).toBe(false)
   })
@@ -23,5 +35,56 @@ describe('status line', () => {
     ['dirty', null, 'Ungespeichert'],
   ] as const)('saveText(%s)', (state, reason, text) => {
     expect(saveText(state, reason)).toBe(text)
+  })
+
+  it('shows the clock and the switches next to it, before the file name', () => {
+    const el = document.createElement('footer')
+    const status = new StatusLine(el, actions(), () => new Date(2026, 9, 16, 9, 7))
+    status.render('a.md', 'saved', null, 'code')
+    expect(q(el, 'status-clock').textContent).toBe('09:07')
+    const order = [...el.children].map((c) => c.className)
+    expect(order.slice(0, 3)).toEqual(['clock', 'rf-switches', 'file'])
+    status.stop()
+  })
+
+  it('lifts the current mode and view; a click on the other side switches', () => {
+    const el = document.createElement('footer')
+    const a = actions()
+    const status = new StatusLine(el, a)
+    status.render('a.md', 'saved', null, 'code')
+    expect(q(el, 'status-edit').classList.contains('active')).toBe(true)
+    expect(q(el, 'status-code').getAttribute('aria-pressed')).toBe('true')
+    expect(q(el, 'status-preview').getAttribute('aria-pressed')).toBe('false')
+    q(el, 'status-preview').click()
+    q(el, 'status-present').click()
+    expect(a.setView).toHaveBeenCalledWith('preview')
+    expect(a.setMode).toHaveBeenCalledWith('present')
+    status.render('a.md', 'saved', null, 'preview')
+    expect(q(el, 'status-preview').classList.contains('active')).toBe(true)
+    expect(q(el, 'status-code').classList.contains('active')).toBe(false)
+    status.stop()
+  })
+
+  it('cannot start Present without an open note', () => {
+    const el = document.createElement('footer')
+    const status = new StatusLine(el, actions())
+    status.render(null, 'saved', null, 'preview')
+    expect(q(el, 'status-present').disabled).toBe(true)
+    status.render('a.md', 'saved', null, 'preview')
+    expect(q(el, 'status-present').disabled).toBe(false)
+    status.stop()
+  })
+
+  it('keeps focus in the editor: switches are not focusable and cancel mousedown', () => {
+    const el = document.createElement('footer')
+    const status = new StatusLine(el, actions())
+    status.render('a.md', 'saved', null, 'preview')
+    for (const id of ['status-edit', 'status-present', 'status-code', 'status-preview']) {
+      expect(q(el, id).tabIndex).toBe(-1)
+      const ev = new MouseEvent('mousedown', { button: 0, bubbles: true, cancelable: true })
+      q(el, id).dispatchEvent(ev)
+      expect(ev.defaultPrevented).toBe(true)
+    }
+    status.stop()
   })
 })

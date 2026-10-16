@@ -1,4 +1,9 @@
+import { chromeButton } from './chrome-button'
+import { Clock } from './clock'
+import { ModeSwitches } from './switches'
 import { zoomLabel } from './zoom'
+
+export { formatClock } from './clock'
 
 export interface InfoLineTab {
   name: string
@@ -12,49 +17,30 @@ export interface InfoLineActions {
   zoomOut(): void
 }
 
-export function formatClock(d: Date): string {
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${p(d.getHours())}:${p(d.getMinutes())}`
-}
-
-function button(
-  testid: string,
-  text: string,
-  title: string,
-  onClick: () => void,
-): HTMLButtonElement {
-  const b = document.createElement('button')
-  b.type = 'button'
-  b.tabIndex = -1
-  b.dataset.testid = testid
-  b.textContent = text
-  b.title = title
-  // tabIndex -1 does not stop a mouse click from focusing the button in Chromium;
-  // cancelling mousedown keeps focus in the editor while click still fires.
-  b.addEventListener('mousedown', (e) => {
-    if (e.button === 0) e.preventDefault()
-  })
-  b.addEventListener('click', onClick)
-  return b
-}
-
-/** Present's only chrome: clock, tabs, back to Edit, zoom, save state. */
+/** Present's only chrome: clock, mode and view switches, tabs, zoom, save state. */
 export class InfoLine {
-  private readonly clock = document.createElement('span')
+  private readonly clock: Clock
+  private readonly switches: ModeSwitches
   private readonly tabs = document.createElement('span')
   private readonly zoom = document.createElement('span')
   private readonly state = document.createElement('span')
-  private timer: ReturnType<typeof setTimeout> | null = null
   /** Kept across refreshes: replacing a button between mousedown and mouseup loses the click. */
   private readonly tabButtons: HTMLButtonElement[] = []
 
   constructor(
     el: HTMLElement,
     private readonly actions: InfoLineActions,
-    private readonly now: () => Date = () => new Date(),
+    now: () => Date = () => new Date(),
   ) {
-    this.clock.className = 'rf-il-clock'
-    this.clock.dataset.testid = 'il-clock'
+    this.clock = new Clock('rf-il-clock', 'il-clock', now)
+    this.switches = new ModeSwitches('il', {
+      setMode: (mode) => {
+        if (mode === 'edit') actions.exitPresent()
+      },
+      // Present always shows Preview; the view side of the switch is disabled here.
+      setView: () => undefined,
+    })
+    this.switches.render('present', 'preview', true)
     this.tabs.className = 'rf-il-tabs'
     this.zoom.className = 'rf-il-zoom'
     this.zoom.dataset.testid = 'il-zoom'
@@ -63,25 +49,23 @@ export class InfoLine {
     const spacer = document.createElement('span')
     spacer.className = 'rf-il-spacer'
     el.replaceChildren(
-      this.clock,
+      this.clock.el,
+      this.switches.el,
       this.tabs,
       spacer,
-      button('il-edit', 'Bearbeiten', 'Präsentation beenden (Esc)', () => actions.exitPresent()),
-      button('il-zoom-out', '−', 'Verkleinern', () => actions.zoomOut()),
+      chromeButton('il-zoom-out', '−', 'Verkleinern', () => actions.zoomOut()),
       this.zoom,
-      button('il-zoom-in', '+', 'Vergrößern', () => actions.zoomIn()),
+      chromeButton('il-zoom-in', '+', 'Vergrößern', () => actions.zoomIn()),
       this.state,
     )
   }
 
   start(): void {
-    this.stop()
-    this.tick()
+    this.clock.start()
   }
 
   stop(): void {
-    if (this.timer !== null) clearTimeout(this.timer)
-    this.timer = null
+    this.clock.stop()
   }
 
   render(tabs: readonly InfoLineTab[], active: number, saveText: string, zoom: number): void {
@@ -89,7 +73,7 @@ export class InfoLine {
     while (this.tabButtons.length > tabs.length) this.tabButtons.pop()?.remove()
     while (this.tabButtons.length < tabs.length) {
       const i = this.tabButtons.length
-      const b = button('il-tab', '', '', () => this.actions.selectTab(i))
+      const b = chromeButton('il-tab', '', '', () => this.actions.selectTab(i))
       b.classList.add('rf-il-tab')
       this.tabButtons.push(b)
       this.tabs.append(b)
@@ -103,13 +87,5 @@ export class InfoLine {
     })
     this.state.textContent = saveText
     this.zoom.textContent = zoomLabel(zoom)
-  }
-
-  /** Shows the time and schedules the next tick at the next minute boundary. */
-  private tick(): void {
-    const d = this.now()
-    this.clock.textContent = formatClock(d)
-    const untilNextMinute = 60_000 - (d.getSeconds() * 1000 + d.getMilliseconds())
-    this.timer = setTimeout(() => this.tick(), untilNextMinute)
   }
 }
