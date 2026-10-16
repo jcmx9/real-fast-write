@@ -5,6 +5,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [26.10.0] - 2026-10-16
+
 ### Fixed
 - The README shows the current version; the release script keeps it up to date
 - A note opened under two path spellings (symlink, case, 8.3 name) uses one tab
