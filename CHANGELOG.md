@@ -1,0 +1,50 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+## [Unreleased]
+
+## [26.10.0] - 2026-10-16
+
+### Fixed
+- The README shows the current version; the release script keeps it up to date
+- A note opened under two path spellings (symlink, case, 8.3 name) uses one tab
+- External changes that are not UTF-8 or delete the note are reported and never silently overwritten
+- A save right after an external change, before the change was reported, no longer overwrites it
+- Notes in a deleted folder are held; a note that could not be read is picked up again once readable
+- A note renamed outside only in case (`a.md` → `A.md`) keeps saving under its new name
+- A failed folder watcher re-arms itself
+- Closing while typing saves every keystroke or asks
+- Present recovers when the OS refuses fullscreen; fast toggles keep the last intent
+- In Preview, arrow keys and clicks below the title block or a table land on the right line (they skipped every second line when zoomed)
+- One conflict banner per tab: an outside case-only rename no longer leaves a second, stale banner
+
+### Added
+- App icon: the mdo logo in white on the accent colour (macOS, Windows, Linux)
+- Packaging with electron-builder and release archives for macOS, Windows and Linux
+- One-line install, update and uninstall (`scripts/bootstrap.sh`, `scripts/bootstrap.ps1`), also for pre-releases (`--pre` / `-Pre`)
+- Settings dialog (folders, rf-document path, Present font factor, header default) with rf-document and font status
+- Release script `scripts/release.sh dev|prod` and release workflow
+- Outline sidebar with H1/H2, folding in sync with the editor, per-mode visibility
+- Insert a page break (`<!-- pagebreak -->`) from the Edit menu or with Mod+Enter
+- Snippets: `:meeting`, `:telefonnotiz`, `:aufgabe`, `:header`, `:newpage` and own `*.tpl.md` templates, triggered with `:`
+- A fold opens when the cursor moves into it
+- Present mode: fullscreen, larger text, title block, info line with clock, tabs, zoom and save state; Esc returns to Edit
+- Zoom per mode (Edit/Present), restored after restart
+- Electron app with tabs and a CodeMirror 6 Markdown editor
+- Autosave with atomic, byte-exact writes (BOM, CRLF and mixed line endings kept)
+- New notes as `YYYY-MM-DD_HH-mm-ss.md` in a default folder, rename without overwrite
+- Session restore, recent files, single instance (`rf-write file.md` opens in the running app)
+- Detection of external changes
+- Clipboard editing, select all and keyboard selection via CodeMirror
+- External-change conflict banner that pauses autosave for that note
+- PDF export via rf-document with readable error messages
+- CI on macOS, Windows and Linux with a real rf-document export
+- Preview in the PDF look: rf-document fonts, headings, lists with squares, clickable checkboxes, alert boxes, striped tables, code blocks with Typst colours
+- Tables like the PDF (columns, alignment, stripes), editable as Markdown on click
+- Code/Preview switch, YAML header that collapses into the PDF title block, section folding (single and all)
+
+### Changed
+- Outline: H1 in the heading serif, H2 smaller on a hairline guide, quieter chevrons, an accent bar on the current heading
+- Body text is justified without hyphenation on every platform (hyphenation only in the PDF)
