@@ -245,6 +245,8 @@ setup_repo() {
   printf '{\n  "name": "x",\n  "version": "26.10.0-dev.0",\n  "private": true\n}\n' >"${work}/package.json"
   printf '{\n  "name": "x",\n  "version": "26.10.0-dev.0",\n  "lockfileVersion": 3,\n  "packages": {\n    "": {\n      "name": "x",\n      "version": "26.10.0-dev.0"\n    }\n  }\n}\n' >"${work}/package-lock.json"
   printf '# Changelog\n\n## [Unreleased]\n\n### Added\n- first\n' >"${work}/CHANGELOG.md"
+  printf '# x\n\n**Version:** 26.10.0-dev.0 · [English](README.en.md)\n\nText\n' >"${work}/README.md"
+  printf '# x\n\n**Version:** 26.10.0-dev.0 · [Deutsch](README.md)\n\nText\n' >"${work}/README.en.md"
   echo base >"${work}/a.txt"
   # Hooks that add attribution trailers: release.sh must bypass them.
   cat >"${work}/.git/hooks/prepare-commit-msg" <<'HOOK'
@@ -304,6 +306,10 @@ expect_plain_script_commits() {
   pass "${label}: script commits have no Co-authored-by/Signed-off-by, only Release-Source"
 }
 
+readme_version() {
+  git -C "$1" show "$2:$3" | sed -n 's/^\*\*Version:\*\* \([^ ]*\) .*/\1/p'
+}
+
 pkg_version() {
   git -C "$1" show "$2:package.json" | sed -n 's/^  "version": "\(.*\)",/\1/p'
 }
@@ -342,6 +348,11 @@ expect_released() {
     "$(git -C "${FAKE_ORIGIN}" rev-parse "v${version}^{commit}")" "$(git -C "${FAKE_ORIGIN}" rev-parse main)"
   expect_eq "${label}: dev continues at ${next_dev}" "$(pkg_version "${FAKE_ORIGIN}" dev)" "${next_dev}"
   expect_eq "${label}: dev lock file at ${next_dev}" "$(lock_versions "${FAKE_ORIGIN}" dev)" "${next_dev} "
+  local readme
+  for readme in README.md README.en.md; do
+    expect_eq "${label}: main ${readme} shows ${version}" "$(readme_version "${FAKE_ORIGIN}" main "${readme}")" "${version}"
+    expect_eq "${label}: dev ${readme} shows ${next_dev}" "$(readme_version "${FAKE_ORIGIN}" dev "${readme}")" "${next_dev}"
+  done
   git -C "${FAKE_ORIGIN}" merge-base --is-ancestor main dev || fail "${label}: main not merged back into dev"
   pass "${label}: main merged back into dev"
   expect_eq "${label}: main was rewritten by the rebase-merge" \
@@ -353,7 +364,7 @@ expect_released() {
   expect_linear_main "${label}"
   # Apart from the version lines, main and dev hold the same files.
   local diff
-  diff="$(git -C "${FAKE_ORIGIN}" diff -U0 main dev | grep -E '^[+-]' | grep -vE '^(\+\+\+|---) ' | grep -v '"version"' || true)"
+  diff="$(git -C "${FAKE_ORIGIN}" diff -U0 main dev | grep -E '^[+-]' | grep -vE '^(\+\+\+|---) ' | grep -v '"version"' | grep -v '^[+-]\*\*Version:\*\* ' || true)"
   expect_eq "${label}: main and dev differ only in the version" "${diff}" ""
   expect_local_clean_dev "${label}"
   expect_eq "${label}: local dev equals origin/dev" "$(git -C "${work}" rev-parse dev)" "$(git -C "${FAKE_ORIGIN}" rev-parse dev)"
@@ -364,6 +375,8 @@ setup_repo
 run_release dev >/dev/null
 expect_eq "dev: package.json bumped on origin/dev" "$(pkg_version "${FAKE_ORIGIN}" dev)" "26.10.0-dev.1"
 expect_eq "dev: lock file bumped (both lines)" "$(lock_versions "${FAKE_ORIGIN}" dev)" "26.10.0-dev.1 "
+expect_eq "dev: README version line bumped" "$(readme_version "${FAKE_ORIGIN}" dev README.md)" "26.10.0-dev.1"
+expect_eq "dev: README.en version line bumped" "$(readme_version "${FAKE_ORIGIN}" dev README.en.md)" "26.10.0-dev.1"
 git -C "${FAKE_ORIGIN}" rev-parse -q --verify refs/tags/v26.10.0-dev.1 >/dev/null || fail "dev: tag not pushed"
 pass "dev: tag v26.10.0-dev.1 pushed"
 expect_eq "dev: commit message" "$(git -C "${FAKE_ORIGIN}" log -1 --format=%s dev)" "release: 26.10.0-dev.1"

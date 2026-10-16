@@ -2,7 +2,7 @@
 
 > Calm Markdown editor for client meetings that already looks like the real-fast-document PDF while you type.
 
-**Version:** 26.10.0-dev.0 · [Deutsch](README.md)
+**Version:** 26.10.0-dev.3 · [Deutsch](README.md)
 
 [![CI](https://github.com/jcmx9/real-fast-write/actions/workflows/ci.yml/badge.svg)](https://github.com/jcmx9/real-fast-write/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)

@@ -42,6 +42,7 @@ poll_interval="${RFW_POLL_INTERVAL:-10}"
 checks_timeout="${RFW_CHECKS_TIMEOUT:-900}"
 gh_repo=""
 version_files=()
+readonly readme_files=(README.md README.en.md)
 dry_run=0
 new_month=0
 
@@ -276,13 +277,27 @@ warn_old_month() {
   fi
 }
 
-# npm updates package.json and package-lock.json together.
+# npm updates package.json and package-lock.json together; the READMEs' "**Version:**"
+# line follows.
 bump_files() {
   run npm version "$1" --no-git-tag-version --allow-same-version
   version_files=(package.json)
   if [[ "${dry_run}" -eq 1 || -f "${root}/package-lock.json" ]]; then
     version_files+=(package-lock.json)
   fi
+  local readme
+  for readme in "${readme_files[@]}"; do
+    [[ -f "${root}/${readme}" ]] || continue
+    if [[ "${dry_run}" -eq 1 ]]; then
+      echo "[dry-run] ${readme}: **Version:** $1"
+      continue
+    fi
+    grep -q '^\*\*Version:\*\* ' "${root}/${readme}" || continue
+    sed "s/^\*\*Version:\*\* [^ ]*/**Version:** $1/" "${root}/${readme}" >"${root}/${readme}.tmp"
+    cat "${root}/${readme}.tmp" >"${root}/${readme}"
+    rm -f "${root}/${readme}.tmp"
+    version_files+=("${readme}")
+  done
 }
 
 # Keep a Changelog: "## [Unreleased]" -> "## [Unreleased]" + "## [<version>] - <date>".
@@ -308,13 +323,13 @@ roll_changelog() {
   version_files+=(CHANGELOG.md)
 }
 
-# True when every conflicted file is package.json/package-lock.json and every conflict
-# hunk in them consists of "version" lines only.
+# True when every conflicted file is package.json/package-lock.json or a README and every
+# conflict hunk in them consists of version lines only.
 only_version_conflicts() {
   local f
   for f in "$@"; do
     case "${f}" in
-      package.json | package-lock.json) ;;
+      package.json | package-lock.json | README.md | README.en.md) ;;
       *) return 1 ;;
     esac
     awk '
@@ -322,7 +337,8 @@ only_version_conflicts() {
       /^\|\|\|\|\|\|\| / { bad = 1 }
       inside && /^=======\r?$/ { next }
       /^>>>>>>> / { inside = 0; next }
-      inside && $0 !~ /^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"[^"]*",?[[:space:]]*\r?$/ { bad = 1 }
+      inside && $0 !~ /^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"[^"]*",?[[:space:]]*\r?$/ &&
+        $0 !~ /^\*\*Version:\*\* / { bad = 1 }
       END { exit (bad || hunks == 0) ? 1 : 0 }
     ' "${root}/${f}" || return 1
   done
@@ -495,7 +511,7 @@ merge_release_into_dev() {
 }
 
 # Merge main into dev and set the next dev version. Only the version lines of
-# package.json/package-lock.json may conflict; anything else aborts with nothing pushed.
+# package.json/package-lock.json and the READMEs may conflict; anything else aborts with nothing pushed.
 back_merge() {
   local version="$1" next_dev="$2" tag="v$1" branch="chore/back-merge-$1"
   step "Back-Merge ${tag} nach dev (${branch}), dev -> ${next_dev}"
