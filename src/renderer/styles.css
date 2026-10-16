@@ -291,6 +291,36 @@ dialog.prompt input:focus-visible {
 #status .export {
   margin-left: auto;
 }
+/* Mode and view switches: flat like info text, the active side lifted, no frame. */
+.rf-switches {
+  display: inline-flex;
+  gap: 12px;
+}
+.rf-sw {
+  display: inline-flex;
+  align-items: baseline;
+}
+.rf-sw-bar {
+  color: var(--line);
+  padding: 0 1px;
+}
+:is(#status, #infoline) .rf-switches button {
+  padding: 0 4px;
+  color: inherit;
+}
+:is(#status, #infoline) .rf-switches button:hover:not(:disabled),
+:is(#status, #infoline) .rf-switches button:active:not(:disabled) {
+  background: transparent;
+  color: var(--chrome-fg);
+}
+:is(#status, #infoline) .rf-switches button.active {
+  color: var(--chrome-fg);
+  font-weight: 600;
+  cursor: default;
+}
+:is(#status, #infoline) .rf-switches button:disabled.active {
+  opacity: 1;
+}
 #notices {
   position: fixed;
   top: 40px;
