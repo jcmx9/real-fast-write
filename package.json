@@ -1,7 +1,7 @@
 {
   "name": "real-fast-write",
   "productName": "rf-write",
-  "version": "26.10.0-dev.1",
+  "version": "26.10.0-dev.2",
   "description": "Calm Markdown editor that looks like the real-fast-document PDF while you type.",
   "license": "MIT",
   "author": "jcmx9",
