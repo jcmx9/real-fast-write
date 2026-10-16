@@ -149,6 +149,8 @@ export interface RfwApi {
   listSnippets(): Promise<SnippetDef[]>
   /** rf-document's installed header.md, or null when it is not available. */
   readHeaderTemplate(): Promise<string | null>
+  /** Shows the shown note's context menu (rename, export, close) at the mouse. */
+  showNoteMenu(): Promise<void>
   getSettingsStatus(): Promise<SettingsStatus>
   /** Main validates every value; resolves to the settings now in effect (invalid ones dropped). */
   updateSettings(patch: SettingsPatch): Promise<Settings>

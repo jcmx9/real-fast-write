@@ -144,9 +144,10 @@ export class App {
     this.tabBar = new TabBar(root.tabbar, {
       select: (i) => this.activate(i),
       close: (id) => void this.closeTab(id),
+      menu: (i) => void this.noteMenu(i),
     })
     this.status = new StatusLine(root.status, {
-      exportPdf: () => void this.exportPdf(),
+      noteMenu: () => void this.noteMenu(),
       setMode: (mode) => {
         if (mode !== this.mode) void this.presentToggle.toggle()
       },
@@ -672,6 +673,14 @@ export class App {
       return
     }
     this.show()
+  }
+
+  /** Context menu of a note; a right click on another tab selects that tab first. */
+  private async noteMenu(index?: number): Promise<void> {
+    if (this.closing) return
+    if (index !== undefined && index !== this.store.activeIndex) this.activate(index)
+    if (!this.store.active) return
+    await this.rfw.showNoteMenu()
   }
 
   private async exportPdf(): Promise<void> {

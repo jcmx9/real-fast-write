@@ -6,6 +6,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Right-click menu on a tab and on the status line file name: rename, PDF export, close tab
 - Menu „Einfügen“: rf-document's `header.md` as the YAML header at the top of the note (interim until template sets); the page break moved here from „Bearbeiten“
 
 ### Fixed
@@ -13,6 +14,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `:header` snippet defaults match rf-document's header.md again (`logo-height: 13mm`, `hard_breaks: true`)
 
 ### Changed
+- The status line has no „PDF exportieren“ button any more (menu, Mod+E, right-click menu); an export shows a quiet progress text
 - Status line and Present info line show the clock with flat switches `Editor | Präsentation` and `Code | Vorschau`; the info line's „Bearbeiten“ button is now the Editor switch
 - Outline: H2 entries hang from tree lines (├─ └─) instead of a hairline guide; the outline grows and shrinks with the zoom of the current mode
 

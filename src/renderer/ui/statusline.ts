@@ -14,18 +14,19 @@ import { Clock } from './clock'
 import { type Mode, ModeSwitches } from './switches'
 
 export interface StatusActions {
-  exportPdf(): void
+  /** Right click on the file name: the note's context menu (rename, export, close). */
+  noteMenu(): void
   setMode(mode: Mode): void
   setView(view: View): void
 }
 
-/** Edit's bottom line: clock, mode and view switches, file name, save state, export. */
+/** Edit's bottom line: clock, mode and view switches, file name, save state, export progress. */
 export class StatusLine {
   private readonly clock: Clock
   private readonly switches: ModeSwitches
   private readonly name = document.createElement('span')
   private readonly state = document.createElement('span')
-  private readonly exportButton = document.createElement('button')
+  private readonly exportState = document.createElement('span')
   private busy = false
 
   constructor(el: HTMLElement, actions: StatusActions, now: () => Date = () => new Date()) {
@@ -34,12 +35,17 @@ export class StatusLine {
     this.name.className = 'file'
     this.state.className = 'state'
     this.state.dataset.testid = 'status-state'
-    this.exportButton.type = 'button'
-    this.exportButton.className = 'export'
-    this.exportButton.dataset.testid = 'export'
-    this.exportButton.addEventListener('click', () => actions.exportPdf())
+    this.name.dataset.testid = 'status-file'
+    this.name.title = 'Rechtsklick: Umbenennen, PDF exportieren, Tab schließen'
+    this.name.addEventListener('contextmenu', (e) => {
+      e.preventDefault()
+      if (this.name.textContent) actions.noteMenu()
+    })
+    this.exportState.className = 'exporting'
+    this.exportState.dataset.testid = 'status-export'
+    this.exportState.textContent = 'PDF wird erstellt …'
     this.setExporting(false)
-    el.append(this.clock.el, this.switches.el, this.name, this.state, this.exportButton)
+    el.append(this.clock.el, this.switches.el, this.name, this.state, this.exportState)
     this.clock.start()
   }
 
@@ -58,14 +64,11 @@ export class StatusLine {
     this.state.textContent = saveText(state, error)
     // A hold is as prominent as a failed save.
     this.state.classList.toggle('error', state === 'error' || state === 'held')
-    this.exportButton.hidden = file === null
   }
 
   setExporting(on: boolean): void {
     this.busy = on
-    this.exportButton.disabled = on
-    this.exportButton.classList.toggle('busy', on)
-    this.exportButton.textContent = on ? 'Exportiere …' : 'PDF exportieren'
+    this.exportState.hidden = !on
   }
 }
 

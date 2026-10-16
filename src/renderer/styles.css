@@ -92,19 +92,16 @@ button.tab-close:disabled {
   cursor: default;
   background: transparent;
 }
-#status .export,
 #empty [data-action="new"],
 dialog.prompt button[type="submit"] {
   color: var(--accent);
   box-shadow: inset 0 0 0 1px var(--accent);
 }
-#status .export:hover:not(:disabled, .busy),
 #empty [data-action="new"]:hover:not(:disabled),
 dialog.prompt button[type="submit"]:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 8%, transparent);
   color: var(--accent);
 }
-#status .export:active:not(:disabled, .busy),
 #empty [data-action="new"]:active:not(:disabled),
 dialog.prompt button[type="submit"]:active:not(:disabled) {
   background: var(--accent);
@@ -315,8 +312,12 @@ dialog.prompt input:focus-visible {
   color: var(--danger);
   font-weight: 600;
 }
-#status .export {
+#status .exporting {
   margin-left: auto;
+  color: var(--accent);
+}
+#status .file {
+  cursor: context-menu;
 }
 /* Mode and view switches: flat like info text, the active side lifted, no frame. */
 .rf-switches {

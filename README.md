@@ -116,6 +116,8 @@ Die Preview nutzt die Schriften von rf-document aus dessen Installationsordner u
 
 `Mod` = Cmd unter macOS, sonst Ctrl. Die Auswahl mit Shift bzw. Mod+Shift und den Pfeiltasten übernimmt CodeMirror.
 
+Ein Rechtsklick auf einen Tab oder auf den Dateinamen in der Statuszeile öffnet ein Menü mit Umbenennen, PDF exportieren und Tab schließen. Die Statuszeile zeigt links die Uhrzeit und die Umschalter `Editor | Präsentation` und `Code | Vorschau`; ein Klick auf die andere Seite schaltet um.
+
 ## Gliederung
 
 Eine Seitenleiste rechts listet die Überschriften H1 und H2 der Notiz. Der Pfeil vor einem Eintrag mit Inhalt (H1 oder H2) klappt den Abschnitt im Text und in der Gliederung gleichzeitig ein oder aus; „Alle ein-/ausklappen“ wirkt ebenso auf beide. Ein Klick auf einen Eintrag springt im Text zur Überschrift, der Fokus bleibt im Editor. Mod+Shift+O blendet die Gliederung ein oder aus; die Einstellung wird getrennt für Edit und Present gemerkt.

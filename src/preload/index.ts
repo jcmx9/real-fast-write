@@ -27,6 +27,7 @@ const api: RfwApi = {
   setFullScreen: (on) => ipcRenderer.invoke(Ch.setFullScreen, on),
   listSnippets: () => ipcRenderer.invoke(Ch.listSnippets),
   readHeaderTemplate: () => ipcRenderer.invoke(Ch.readHeaderTemplate),
+  showNoteMenu: () => ipcRenderer.invoke(Ch.noteMenu),
   getSettingsStatus: () => ipcRenderer.invoke(Ch.settingsStatus),
   updateSettings: (patch) => ipcRenderer.invoke(Ch.updateSettings, patch),
   choosePath: (kind, current) => ipcRenderer.invoke(Ch.choosePath, kind, current),

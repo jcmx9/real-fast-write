@@ -116,6 +116,8 @@ The preview uses rf-document's fonts from its install folder and otherwise falls
 
 `Mod` = Cmd on macOS, Ctrl elsewhere. Selecting with Shift or Mod+Shift and the arrow keys is handled by CodeMirror.
 
+A right click on a tab or on the file name in the status line opens a menu with rename, PDF export and close tab. The status line shows the time on the left and the switches `Editor | Präsentation` and `Code | Vorschau`; a click on the other side switches.
+
 ## Outline
 
 A sidebar on the right lists the H1 and H2 headings of the note. The chevron in front of an entry with content (H1 or H2) folds or unfolds the section in the text and in the outline at the same time; fold/unfold all acts on both as well. Clicking an entry jumps to the heading in the text, and focus stays in the editor. Mod+Shift+O toggles the outline; the setting is remembered separately for Edit and Present.

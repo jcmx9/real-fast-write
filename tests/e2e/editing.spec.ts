@@ -88,7 +88,7 @@ test('select all still reaches the editor when a button has focus', async () => 
   const file = join(dirs.notes, 'button.md')
   await writeFile(file, 'Inhalt')
   const { app, page } = await launch({ dirs, args: [file] })
-  await page.getByTestId('export').focus()
+  await page.getByTestId('status-code').focus()
   await clickMenu(app, 'select-all')
   await expect(page.locator('.cm-selectionBackground').first()).toBeVisible()
   await page.keyboard.type('X')
@@ -161,4 +161,38 @@ test('quitting the app (Cmd+Q path) while typing saves every keystroke typed bef
       electronApp.quit()
     }),
   )
+})
+
+test('right click on a tab or the file name offers rename; a background tab is selected first', async () => {
+  const dirs = await makeDirs()
+  const a = join(dirs.notes, 'Erste.md')
+  const b = join(dirs.notes, 'Zweite.md')
+  await writeFile(a, 'A')
+  await writeFile(b, 'B')
+  const { app, page } = await launch({ dirs, args: [a, b] })
+  // Native popups cannot be clicked from Playwright: record the menu and click its item in main.
+  await app.evaluate(({ Menu }) => {
+    const g = globalThis as { lastPopup?: unknown }
+    Menu.prototype.popup = function (this: unknown) {
+      g.lastPopup = this
+    }
+  })
+  const clickItem = (label: string) =>
+    app.evaluate((_e, l) => {
+      const menu = (globalThis as { lastPopup?: Electron.Menu }).lastPopup
+      const item = menu?.items.find((i) => i.label === l)
+      if (!item) throw new Error(`no popup item ${l}`)
+      item.click()
+    }, label)
+  await page.getByTestId('tab').filter({ hasText: 'Erste.md' }).click({ button: 'right' })
+  await expect(page.getByTestId('tab').filter({ hasText: 'Erste.md' })).toHaveClass(/active/)
+  await clickItem('Umbenennen …')
+  await expect(page.locator('dialog.prompt')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.locator('dialog.prompt')).toHaveCount(0)
+  await page.getByTestId('status-file').click({ button: 'right' })
+  await clickItem('Umbenennen …')
+  await expect(page.locator('dialog.prompt input')).toHaveValue(/Erste/)
+  await page.keyboard.press('Escape')
+  await app.close()
 })
