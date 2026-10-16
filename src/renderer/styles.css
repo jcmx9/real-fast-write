@@ -178,8 +178,8 @@ dialog.prompt input:focus-visible {
   padding: 8px 4px;
   background: var(--chrome-bg);
   color: var(--chrome-muted);
-  /* Chrome size: the zoom variables only apply inside #editor. */
-  font-size: 13px;
+  /* Chrome size, scaled with the editor zoom of the current mode (--rf-ol-zoom). */
+  font-size: calc(13px * var(--rf-ol-zoom, 1));
 }
 #outline .rf-ol-list {
   margin: 0;
@@ -200,7 +200,7 @@ dialog.prompt input:focus-visible {
   background: transparent;
   color: inherit;
   font: inherit;
-  padding: 2px 4px;
+  padding: calc(2px * var(--rf-ol-zoom, 1)) calc(4px * var(--rf-ol-zoom, 1));
   cursor: pointer;
 }
 #outline button:hover,
@@ -213,7 +213,7 @@ dialog.prompt input:focus-visible {
 }
 #outline .rf-ol-label {
   flex: 1;
-  padding-inline: 6px 4px;
+  padding-inline: calc(6px * var(--rf-ol-zoom, 1)) calc(4px * var(--rf-ol-zoom, 1));
   min-width: 0;
   max-width: 100%;
   text-align: left;
@@ -227,34 +227,61 @@ dialog.prompt input:focus-visible {
   color: var(--accent);
   box-shadow: inset 2px 0 var(--accent);
 }
-/* Hierarchy like the document: H1 in the heading serif, H2 smaller on a hairline guide. */
+/* Hierarchy: H1 in the heading serif, H2 hanging from tree lines (├─ └─). */
 #outline .rf-ol-list > .rf-ol-h1 + .rf-ol-h1 {
-  margin-top: 6px;
+  margin-top: calc(6px * var(--rf-ol-zoom, 1));
 }
 #outline .rf-ol-h1 > .rf-ol-label {
   font-family: var(--rfd-font-serif);
-  font-size: 14px;
+  font-size: calc(14px * var(--rf-ol-zoom, 1));
   font-weight: 560;
   color: var(--rfd-heading);
 }
 #outline .rf-ol-h1 > .rf-ol-list {
-  /* The guide runs below the centre of the H1 chevron slot (18px wide). */
-  margin: 1px 0 2px 8.5px;
-  border-left: 1px solid var(--line-soft);
+  /* The trunk runs below the centre of the H1 chevron slot (18px wide). */
+  margin: 0 0 calc(2px * var(--rf-ol-zoom, 1)) calc(8.5px * var(--rf-ol-zoom, 1));
+}
+#outline .rf-ol-h1 > .rf-ol-list > .rf-ol-item {
+  /* Half the height of an H2 row: where the branch meets the label. */
+  --rf-ol-mid: calc(10px * var(--rf-ol-zoom, 1));
+  position: relative;
+  padding-left: calc(10px * var(--rf-ol-zoom, 1));
+}
+/* Trunk: through every H2 row, ending at the branch of the last one (└─). */
+#outline .rf-ol-h1 > .rf-ol-list > .rf-ol-item::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  border-left: 1px solid var(--line);
+}
+#outline .rf-ol-h1 > .rf-ol-list > .rf-ol-item:last-child::before {
+  bottom: auto;
+  height: var(--rf-ol-mid);
+}
+/* Branch: from the trunk to the H2 row. */
+#outline .rf-ol-h1 > .rf-ol-list > .rf-ol-item::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: var(--rf-ol-mid);
+  width: calc(9px * var(--rf-ol-zoom, 1));
+  border-top: 1px solid var(--line);
 }
 #outline .rf-ol-h2 > .rf-ol-label {
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--rf-ol-zoom, 1));
   color: var(--chrome-muted);
 }
 #outline .rf-ol-chevron,
 #outline .rf-ol-spacer {
   flex: none;
-  width: 18px;
+  width: calc(18px * var(--rf-ol-zoom, 1));
   text-align: center;
   padding-inline: 0;
 }
 #outline .rf-ol-chevron {
-  font-size: 11px;
+  font-size: calc(11px * var(--rf-ol-zoom, 1));
   color: var(--rfd-faint);
 }
 #outline .rf-ol-chevron:hover {

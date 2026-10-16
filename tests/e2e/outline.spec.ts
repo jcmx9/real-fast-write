@@ -110,11 +110,11 @@ test('chevron folds text and outline in sync; unfold-all and fold-all follow', a
   await clickMenu(app, 'fold-all')
   // Only the two H1 folds are visible; the H2 folds sit inside them.
   await expect(page.locator('.cm-foldPlaceholder')).toHaveCount(2)
-  const states = await chevrons(page).evaluateAll((els) =>
-    els.map((el) => el.getAttribute('aria-expanded')),
-  )
-  expect(states.length).toBeGreaterThan(0)
-  expect(states.every((s) => s === 'false')).toBe(true)
+  // The outline refreshes on the next animation frame: wait for it, do not read once.
+  const states = () =>
+    chevrons(page).evaluateAll((els) => els.map((el) => el.getAttribute('aria-expanded')))
+  await expect.poll(async () => (await states()).length).toBeGreaterThan(0)
+  await expect.poll(async () => (await states()).every((s) => s === 'false')).toBe(true)
   await app.close()
 })
 
@@ -213,5 +213,27 @@ test('a classic scrollbar does not cut a medium heading short', async () => {
   expect(m.scrollbar).toBeGreaterThan(0)
   expect(m.overflows, JSON.stringify(m)).toBe(false)
   expect(m.bar).toBeLessThanOrEqual(m.win * 0.33 + 1)
+  await app.close()
+})
+
+test('the outline grows and shrinks with the zoom; H2 rows hang from tree lines', async () => {
+  const { app, page } = await openNote()
+  await clickMenu(app, 'toggle-outline')
+  const size = () =>
+    labels(page)
+      .first()
+      .evaluate((el) => Number.parseFloat(getComputedStyle(el).fontSize))
+  const base = await size()
+  await clickMenu(app, 'zoom-in')
+  await expect.poll(size).toBeGreaterThan(base)
+  await shot(page, 'outline-zoomed')
+  await clickMenu(app, 'zoom-reset')
+  await expect.poll(size).toBe(base)
+  // Every H2 row draws a branch; the last one under an H1 ends the trunk (└─).
+  const branch = await page
+    .locator('#outline .rf-ol-h2')
+    .first()
+    .evaluate((el) => getComputedStyle(el, '::after').borderTopWidth)
+  expect(branch).toBe('1px')
   await app.close()
 })
