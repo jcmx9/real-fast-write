@@ -100,6 +100,7 @@ export type MenuCommand =
   | 'redo'
   | 'select-all'
   | 'insert-pagebreak'
+  | 'insert-header'
   | 'toggle-present'
   | 'toggle-view'
   | 'toggle-header'
@@ -146,6 +147,8 @@ export interface RfwApi {
   /** The OS did not enter the fullscreen the app requested; Present continues windowed. */
   onFullScreenRefused(cb: () => void): void
   listSnippets(): Promise<SnippetDef[]>
+  /** rf-document's installed header.md, or null when it is not available. */
+  readHeaderTemplate(): Promise<string | null>
   getSettingsStatus(): Promise<SettingsStatus>
   /** Main validates every value; resolves to the settings now in effect (invalid ones dropped). */
   updateSettings(patch: SettingsPatch): Promise<Settings>

@@ -160,8 +160,14 @@ export function buildMenuTemplate(d: MenuDeps): MenuItemConstructorOptions[] {
       { role: 'copy', label: 'Kopieren' },
       { role: 'paste', label: 'Einfügen' },
       item('select-all', 'Alles auswählen', 'CmdOrCtrl+A'),
-      sep,
-      item('insert-pagebreak', 'Seitenumbruch einfügen', 'CmdOrCtrl+Enter'),
+    ],
+  }
+
+  const insert: MenuItemConstructorOptions = {
+    label: 'Einfügen',
+    submenu: [
+      item('insert-header', 'YAML-Header (rf-document)'),
+      item('insert-pagebreak', 'Seitenumbruch', 'CmdOrCtrl+Enter'),
     ],
   }
 
@@ -205,5 +211,5 @@ export function buildMenuTemplate(d: MenuDeps): MenuItemConstructorOptions[] {
     ],
   }
 
-  return [...(mac ? [appMenu] : []), file, edit, view, window]
+  return [...(mac ? [appMenu] : []), file, edit, insert, view, window]
 }

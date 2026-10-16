@@ -14,6 +14,7 @@ import type {
 } from '../shared/types'
 import { AutosaveScheduler } from './editor/autosave'
 import { headerHidden, headerToggleSpec, moveOutOfHeader } from './editor/header'
+import { insertHeader } from './editor/insert-header'
 import { modeCompartment, modeExtensions } from './editor/mode'
 import { jumpToEntry, OutlineSync, toggleEntryFold } from './editor/outline-actions'
 import { insertPageBreak } from './editor/pagebreak'
@@ -230,7 +231,11 @@ export class App {
     if (!allowedWithDialog(cmd, document.querySelector('dialog[open]') !== null)) return
     if (
       this.mode === 'present' &&
-      (cmd === 'export' || cmd === 'toggle-view' || cmd === 'toggle-header' || cmd === 'settings')
+      (cmd === 'export' ||
+        cmd === 'toggle-view' ||
+        cmd === 'toggle-header' ||
+        cmd === 'insert-header' ||
+        cmd === 'settings')
     ) {
       this.notices.toast('Im Präsentationsmodus nicht verfügbar – Esc beendet ihn.')
       return
@@ -265,6 +270,8 @@ export class App {
         return this.editCommand('selectAll', selectAll)
       case 'insert-pagebreak':
         return this.editCommand('insertPageBreak', insertPageBreak)
+      case 'insert-header':
+        return this.insertHeaderTemplate()
       case 'toggle-view':
         return this.setView(this.view === 'code' ? 'preview' : 'code')
       case 'toggle-header':
@@ -534,6 +541,33 @@ export class App {
         console.error('setFullScreen(false) failed', e)
       }
     })
+  }
+
+  /** Interim until template sets exist: rf-document's header.md at the top of the note. */
+  private async insertHeaderTemplate(): Promise<void> {
+    const tab = this.shownId === null ? undefined : this.store.get(this.shownId)
+    if (!tab) return
+    const template = await this.rfw.readHeaderTemplate()
+    // The user may have switched tabs or started closing while main read the file.
+    if (this.closing || this.shownId !== tab.id) return
+    if (template === null) {
+      this.notices.toast('header.md von rf-document nicht gefunden – ist rf-document installiert?')
+      return
+    }
+    const state = this.editor.state
+    const res = insertHeader(state, template)
+    if ('refused' in res) {
+      this.notices.toast('Die Notiz hat schon einen YAML-Header.')
+      return
+    }
+    // The cursor lands in the header: a collapsed header is shown, never hiding the cursor.
+    const show = state.field(headerHidden) ? headerToggleSpec(state, false).effects : undefined
+    this.editor.dispatch({ ...res.spec, effects: show })
+    if (show) {
+      tab.headerHidden = false
+      this.syncMain()
+    }
+    this.editor.focus()
   }
 
   private toggleHeader(): void {
