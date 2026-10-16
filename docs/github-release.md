@@ -1,6 +1,7 @@
 # Releasing rf-write
 
-Versions use CalVer `YY.M.MICRO`. The single source is `version` in `package.json`.
+Versions use CalVer `YY.M.MICRO`. The single source is `version` in `package.json`; every
+bump also rewrites the `**Version:**` line of `README.md` and `README.en.md`.
 Dev builds are `YY.M.MICRO-dev.N`. A tag `v<version>` triggers
 `.github/workflows/release.yml`; a tag containing `-dev.` publishes a GitHub pre-release,
 any other tag a normal release.
@@ -50,7 +51,7 @@ would carry an older `YY.M` than today.
 6. Back-merge `chore/back-merge-<version>`: from `origin/dev`, a merge commit with `main`
    as second parent whose content is dev plus the release delta
    (`Release-Source..main`: version, CHANGELOG, hotfixes). Only conflicts in the version
-   lines are resolved automatically; dev then gets the next `YY.M.(MICRO+1)-dev.0`. The
+   lines (`package.json`, `package-lock.json`, the READMEs) are resolved automatically; dev then gets the next `YY.M.(MICRO+1)-dev.0`. The
    PR into `dev` is merged with a merge commit.
 
 Nothing is pushed on a failed precondition. The script aborts on every error.

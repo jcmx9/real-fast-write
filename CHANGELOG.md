@@ -6,6 +6,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Fixed
+- The README shows the current version; the release script keeps it up to date
 - A note opened under two path spellings (symlink, case, 8.3 name) uses one tab
 - External changes that are not UTF-8 or delete the note are reported and never silently overwritten
 - A save right after an external change, before the change was reported, no longer overwrites it
