@@ -612,4 +612,27 @@ expect_eq "notes: pre-release uses [Unreleased]" "$("${notes}" 26.10.1-dev.3 "${
 expect_eq "notes: last section" "$("${notes}" 25.1.0 "${tmp}/CHANGELOG.md")" "- old"
 expect_eq "notes: missing section" "$("${notes}" 9.9.9 "${tmp}/CHANGELOG.md")" "Release 9.9.9"
 
+# --- 5. released CHANGELOG sections stay as tagged ---------------------------
+cl="${tmp}/cl-repo"
+rm -rf "${cl}"
+git init -q -b main "${cl}"
+mkdir -p "${cl}/scripts"
+cp "${root}/scripts/check-changelog.sh" "${root}/scripts/release-notes.sh" "${cl}/scripts/"
+printf '# Changelog\n\n## [Unreleased]\n\n## [26.10.0] - 2026-10-15\n\n### Added\n- a\n' >"${cl}/CHANGELOG.md"
+git -C "${cl}" add -A
+git -C "${cl}" -c core.hooksPath=/dev/null commit -q -m "release: 26.10.0"
+git -C "${cl}" tag v26.10.0
+check() { (cd "${cl}" && scripts/check-changelog.sh >/dev/null 2>&1); }
+check || fail "changelog: unchanged history refused"
+pass "changelog: unchanged released section passes"
+printf '# Changelog\n\n## [Unreleased]\n\n### Fixed\n- new\n\n## [26.10.0] - 2026-10-15\n\n### Added\n- a\n' >"${cl}/CHANGELOG.md"
+check || fail "changelog: a new entry under [Unreleased] refused"
+pass "changelog: new entries under [Unreleased] pass"
+printf '# Changelog\n\n## [Unreleased]\n\n## [26.10.0] - 2026-10-15\n\n### Added\n- a\n- late\n' >"${cl}/CHANGELOG.md"
+if check; then fail "changelog: an entry added to a released section was accepted"; fi
+pass "changelog: an entry added to a released section fails"
+printf '# Changelog\n\n## [Unreleased]\n\n## [26.10.1] - 2026-10-20\n\n- next\n\n## [26.10.0] - 2026-10-15\n\n### Added\n- a\n' >"${cl}/CHANGELOG.md"
+check || fail "changelog: an untagged release section refused"
+pass "changelog: a section without a tag yet (release PR) passes"
+
 echo "All release tests passed."
