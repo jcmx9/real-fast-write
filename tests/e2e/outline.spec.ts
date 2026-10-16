@@ -110,11 +110,11 @@ test('chevron folds text and outline in sync; unfold-all and fold-all follow', a
   await clickMenu(app, 'fold-all')
   // Only the two H1 folds are visible; the H2 folds sit inside them.
   await expect(page.locator('.cm-foldPlaceholder')).toHaveCount(2)
-  const states = await chevrons(page).evaluateAll((els) =>
-    els.map((el) => el.getAttribute('aria-expanded')),
-  )
-  expect(states.length).toBeGreaterThan(0)
-  expect(states.every((s) => s === 'false')).toBe(true)
+  // The outline refreshes on the next animation frame: wait for it, do not read once.
+  const states = () =>
+    chevrons(page).evaluateAll((els) => els.map((el) => el.getAttribute('aria-expanded')))
+  await expect.poll(async () => (await states()).length).toBeGreaterThan(0)
+  await expect.poll(async () => (await states()).every((s) => s === 'false')).toBe(true)
   await app.close()
 })
 
