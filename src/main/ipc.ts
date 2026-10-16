@@ -1,3 +1,4 @@
+import { homedir } from 'node:os'
 import { isAbsolute } from 'node:path'
 import { BrowserWindow, dialog, ipcMain } from 'electron'
 import { Ch } from '../shared/ipc'
@@ -15,7 +16,9 @@ import {
   renameNote,
   writeNoteBytes,
 } from './files'
+import { rfDocumentDir } from './fonts'
 import { setWindowFullScreen } from './fullscreen'
+import { readHeaderTemplate } from './header-template'
 import { loadUserSnippets } from './snippets'
 
 const str = (v: unknown): string => {
@@ -30,6 +33,9 @@ class SaveConflict extends Error {}
 export function registerIpc(ctx: AppContext): void {
   ipcMain.handle(Ch.startup, () => ctx.startup())
   ipcMain.handle(Ch.listSnippets, () => loadUserSnippets(ctx.settings.snippetFolder))
+  ipcMain.handle(Ch.readHeaderTemplate, () =>
+    readHeaderTemplate(rfDocumentDir(process.platform, process.env, homedir())),
+  )
   ipcMain.handle(Ch.settingsStatus, () => ctx.settingsStatus())
   ipcMain.handle(Ch.updateSettings, (_e, patch: unknown) => ctx.updateSettings(patch))
 

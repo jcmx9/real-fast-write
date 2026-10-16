@@ -212,3 +212,36 @@ test('page break from the menu and with Mod+Enter inserts exactly one', async ()
   )
   await app.close()
 })
+
+test('Einfügen → YAML-Header puts rf-document’s header.md on top, once', async () => {
+  const dirs = await makeDirs()
+  const rfd = join(dirs.root, 'rfd')
+  await mkdir(rfd)
+  await writeFile(join(rfd, 'header.md'), '---\n# Vorlage\ntitle: ""\nlang: de\n---\n')
+  const note = join(dirs.notes, 'Termin.md')
+  await writeFile(note, '# Termin\n\nText\n')
+  const { app, page } = await launch({ dirs, args: [note], env: { RFD_HOME: rfd } })
+  await clickMenu(app, 'insert-header')
+  await page.keyboard.type('Kickoff')
+  await waitForFile(note, (b) =>
+    b.toString('utf8').startsWith('---\n# Vorlage\ntitle: "Kickoff"\nlang: de\n---\n\n# Termin'),
+  )
+  await clickMenu(app, 'insert-header')
+  await expect(page.locator('.toast')).toContainText('schon einen YAML-Header')
+  await app.close()
+})
+
+test('Einfügen → YAML-Header without rf-document says so and changes nothing', async () => {
+  const dirs = await makeDirs()
+  const note = join(dirs.notes, 'Termin.md')
+  await writeFile(note, 'Text\n')
+  const { app, page } = await launch({
+    dirs,
+    args: [note],
+    env: { RFD_HOME: join(dirs.root, 'fehlt') },
+  })
+  await clickMenu(app, 'insert-header')
+  await expect(page.locator('.toast')).toContainText('header.md von rf-document nicht gefunden')
+  await expect(page.locator('.cm-content')).toHaveText('Text')
+  await app.close()
+})

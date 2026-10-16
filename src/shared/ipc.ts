@@ -19,6 +19,7 @@ export const Ch = {
   fullScreenLeft: 'rfw:fullscreen-left',
   fullScreenRefused: 'rfw:fullscreen-refused',
   listSnippets: 'rfw:list-snippets',
+  readHeaderTemplate: 'rfw:read-header-template',
   settingsStatus: 'rfw:settings-get-status',
   updateSettings: 'rfw:settings-update',
   choosePath: 'rfw:settings-choose-path',

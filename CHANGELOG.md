@@ -5,6 +5,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- Menu „Einfügen“: rf-document's `header.md` as the YAML header at the top of the note (interim until template sets); the page break moved here from „Bearbeiten“
+
+### Fixed
+- `:header` snippet defaults match rf-document's header.md again (`logo-height: 13mm`, `hard_breaks: true`)
+
 ### Changed
 - Status line and Present info line show the clock with flat switches `Editor | Präsentation` and `Code | Vorschau`; the info line's „Bearbeiten“ button is now the Editor switch
 - Outline: H2 entries hang from tree lines (├─ └─) instead of a hairline guide; the outline grows and shrinks with the zoom of the current mode

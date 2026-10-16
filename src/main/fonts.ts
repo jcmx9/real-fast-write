@@ -17,22 +17,28 @@ export const FONT_FILES: readonly string[] = [
   'NotoSansSymbols2-Regular.ttf',
 ]
 
-/** rf-document's install folder for fonts (same rules as its bootstrap). */
+/** rf-document's install folder (same rules as its bootstrap). */
+export function rfDocumentDir(
+  platform: NodeJS.Platform,
+  env: Record<string, string | undefined>,
+  home: string,
+): string {
+  const p = platform === 'win32' ? path.win32 : path.posix
+  if (env.RFD_HOME) return env.RFD_HOME
+  if (platform === 'win32') {
+    return p.join(env.LOCALAPPDATA || p.join(home, 'AppData', 'Local'), 'real-fast-document')
+  }
+  return p.join(env.XDG_DATA_HOME || p.join(home, '.local', 'share'), 'real-fast-document')
+}
+
+/** rf-document's install folder for fonts. */
 export function fontDir(
   platform: NodeJS.Platform,
   env: Record<string, string | undefined>,
   home: string,
 ): string {
   const p = platform === 'win32' ? path.win32 : path.posix
-  if (env.RFD_HOME) return p.join(env.RFD_HOME, 'fonts')
-  if (platform === 'win32') {
-    return p.join(
-      env.LOCALAPPDATA || p.join(home, 'AppData', 'Local'),
-      'real-fast-document',
-      'fonts',
-    )
-  }
-  return p.join(env.XDG_DATA_HOME || p.join(home, '.local', 'share'), 'real-fast-document', 'fonts')
+  return p.join(rfDocumentDir(platform, env, home), 'fonts')
 }
 
 /** Only whitelisted file names are served; anything else (paths, traversal) is refused. */

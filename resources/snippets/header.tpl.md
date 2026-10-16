@@ -12,9 +12,9 @@ header: "$10"             # fester Kopfzeilentext
 print_filename: ${11:true}   # Angabe links in der Fußzeile
 watermark: "$12"          # z. B. ENTWURF
 logo: "$13"               # Logo nur für dieses Dokument
-logo-height: ${14:20mm}      # maximale Logohöhe, bis 25mm
+logo-height: ${14:13mm}      # maximale Logohöhe, bis 25mm
 embed_source: ${15:true}     # Markdown-Quelle ins PDF einbetten
-hard_breaks: ${16:false}     # jede Zeile bleibt eine Zeile
+hard_breaks: ${16:true}      # jede Zeile bleibt eine Zeile
 ---
 
 $0
