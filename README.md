@@ -2,7 +2,7 @@
 
 > Ruhiger Markdown-Editor für Kundentermine, der schon beim Tippen aussieht wie das PDF von real-fast-document.
 
-**Version:** 26.10.1-dev.0 · [English](README.en.md)
+**Version:** 26.10.1-dev.1 · [English](README.en.md)
 
 [![CI](https://github.com/jcmx9/real-fast-write/actions/workflows/ci.yml/badge.svg)](https://github.com/jcmx9/real-fast-write/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
