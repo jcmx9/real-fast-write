@@ -189,7 +189,8 @@ test('short headings get the minimum width of 14em', async () => {
 })
 
 test('a classic scrollbar does not cut a medium heading short', async () => {
-  const medium = 'Mittellange Überschrift Nr. 1'.padEnd(40, 'x')
+  // Fits 33vw even in a ~1000px window with the H1 serif at 14px (Windows CI windows are narrower).
+  const medium = 'Mittellange Überschrift Nr. 1'
   const body = Array.from({ length: 80 }, (_, i) => `# Kurz ${i}\n\nText.\n`).join('\n')
   const { app, page } = await openNote(`# ${medium}\n\nText.\n\n${body}`)
   // Force a non-overlay scrollbar as on Windows/Linux (CSSOM rule, not blocked by the CSP).
@@ -210,7 +211,7 @@ test('a classic scrollbar does not cut a medium heading short', async () => {
     }
   })
   expect(m.scrollbar).toBeGreaterThan(0)
-  expect(m.overflows).toBe(false)
+  expect(m.overflows, JSON.stringify(m)).toBe(false)
   expect(m.bar).toBeLessThanOrEqual(m.win * 0.33 + 1)
   await app.close()
 })
