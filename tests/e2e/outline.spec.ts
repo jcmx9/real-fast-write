@@ -215,3 +215,25 @@ test('a classic scrollbar does not cut a medium heading short', async () => {
   expect(m.bar).toBeLessThanOrEqual(m.win * 0.33 + 1)
   await app.close()
 })
+
+test('the outline grows and shrinks with the zoom; H2 rows hang from tree lines', async () => {
+  const { app, page } = await openNote()
+  await clickMenu(app, 'toggle-outline')
+  const size = () =>
+    labels(page)
+      .first()
+      .evaluate((el) => Number.parseFloat(getComputedStyle(el).fontSize))
+  const base = await size()
+  await clickMenu(app, 'zoom-in')
+  await expect.poll(size).toBeGreaterThan(base)
+  await shot(page, 'outline-zoomed')
+  await clickMenu(app, 'zoom-reset')
+  await expect.poll(size).toBe(base)
+  // Every H2 row draws a branch; the last one under an H1 ends the trunk (└─).
+  const branch = await page
+    .locator('#outline .rf-ol-h2')
+    .first()
+    .evaluate((el) => getComputedStyle(el, '::after').borderTopWidth)
+  expect(branch).toBe('1px')
+  await app.close()
+})

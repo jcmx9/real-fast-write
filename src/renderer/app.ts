@@ -396,6 +396,8 @@ export class App {
     const { body, code } = editorSizes(this.mode, this.zoom[this.mode], this.presentFactor)
     this.root.editor.style.setProperty('--rf-body-size', body)
     this.root.editor.style.setProperty('--rf-code-size', code)
+    // The outline follows the zoom of the mode, not Present's larger text factor.
+    this.root.outline.style.setProperty('--rf-ol-zoom', String(this.zoom[this.mode]))
     this.editor.requestMeasure()
   }
 
