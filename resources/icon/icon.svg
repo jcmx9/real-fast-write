@@ -1,6 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <!-- rf-write app icon. Logo: mdo-cli/logo/mdo-logo.svg (white), on the accent colour #1f6f6a.
        Body 824x824 at 100,100 with radius 185 follows the macOS icon grid. -->
+  <title>rf-write</title>
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#26817b"/>
