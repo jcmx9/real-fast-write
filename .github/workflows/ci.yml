@@ -40,7 +40,8 @@ jobs:
           set -euo pipefail
           scripts/test-release.sh
           scripts/release.sh dev --dry-run
-          scripts/release.sh prod --dry-run
+          # prod starts from a -dev.N version; a release commit (main) has none.
+          if grep -q '"version": ".*-dev\.' package.json; then scripts/release.sh prod --dry-run; fi
       - run: npm run typecheck
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
