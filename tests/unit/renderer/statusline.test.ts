@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { StatusLine, saveText } from '../../../src/renderer/ui/statusline'
 
-const actions = () => ({ exportPdf: vi.fn(), setMode: vi.fn(), setView: vi.fn() })
+const actions = () => ({ noteMenu: vi.fn(), setMode: vi.fn(), setView: vi.fn() })
 const q = (el: HTMLElement, id: string) =>
   el.querySelector(`[data-testid=${id}]`) as HTMLButtonElement
 
@@ -85,6 +85,38 @@ describe('status line', () => {
       q(el, id).dispatchEvent(ev)
       expect(ev.defaultPrevented).toBe(true)
     }
+    status.stop()
+  })
+
+  it('has no export button; an export shows only a quiet progress text', () => {
+    const el = document.createElement('footer')
+    const status = new StatusLine(el, actions())
+    status.render('a.md', 'saved', null, 'preview')
+    expect(el.querySelector('button.export, [data-testid=export]')).toBeNull()
+    const progress = el.querySelector('[data-testid=status-export]') as HTMLElement
+    expect(progress.hidden).toBe(true)
+    status.setExporting(true)
+    expect(status.exporting).toBe(true)
+    expect(progress.hidden).toBe(false)
+    expect(progress.textContent).toBe('PDF wird erstellt …')
+    status.setExporting(false)
+    expect(progress.hidden).toBe(true)
+    status.stop()
+  })
+
+  it('opens the note menu on a right click on the file name, not without a note', () => {
+    const el = document.createElement('footer')
+    const a = actions()
+    const status = new StatusLine(el, a)
+    const file = el.querySelector('[data-testid=status-file]') as HTMLElement
+    status.render(null, 'saved', null, 'preview')
+    file.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+    expect(a.noteMenu).not.toHaveBeenCalled()
+    status.render('a.md', 'saved', null, 'preview')
+    const ev = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+    file.dispatchEvent(ev)
+    expect(ev.defaultPrevented).toBe(true)
+    expect(a.noteMenu).toHaveBeenCalledOnce()
     status.stop()
   })
 })

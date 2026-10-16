@@ -1,6 +1,11 @@
 import type { MenuItemConstructorOptions } from 'electron'
 import { describe, expect, it, vi } from 'vitest'
-import { buildMenuTemplate, type MenuDeps, PresentKeyGuard } from '../../../src/main/menu'
+import {
+  buildMenuTemplate,
+  type MenuDeps,
+  noteMenuTemplate,
+  PresentKeyGuard,
+} from '../../../src/main/menu'
 
 const deps = (over: Partial<MenuDeps> = {}): MenuDeps => ({
   platform: 'darwin',
@@ -292,5 +297,23 @@ describe('settings item', () => {
     expect(settings?.accelerator).toBe('CmdOrCtrl+,')
     click(settings)
     expect(d.command).toHaveBeenCalledWith('settings')
+  })
+})
+
+describe('noteMenuTemplate', () => {
+  it('offers rename, export and close; shortcuts only shown, not registered twice', () => {
+    const command = vi.fn()
+    const items = noteMenuTemplate(command)
+    expect(items.map((i) => i.label ?? i.type)).toEqual([
+      'Umbenennen …',
+      'PDF exportieren',
+      'separator',
+      'Tab schließen',
+    ])
+    for (const i of items.filter((x) => x.type !== 'separator')) {
+      expect(i.registerAccelerator).toBe(false)
+      ;(i.click as () => void)()
+    }
+    expect(command.mock.calls.map((c) => c[0])).toEqual(['rename', 'export', 'close-tab'])
   })
 })

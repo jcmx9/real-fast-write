@@ -22,7 +22,7 @@ test('passes the saved note to rf-document and shows its message', async () => {
   const note = join(dirs.notes, 'notiz.md')
   await writeFile(note, '# Test\n')
   const { app, page } = await launch({ dirs, args: [note], settings: { rfDocumentPath: bin } })
-  await page.getByTestId('export').click()
+  await clickMenu(app, 'export')
   await expect(page.locator('.toast')).toContainText('OK erzeugt')
   expect((await readFile(argsFile, 'utf8')).trim()).toBe(note)
   await app.close()

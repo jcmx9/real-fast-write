@@ -1,6 +1,6 @@
 import { homedir } from 'node:os'
 import { isAbsolute } from 'node:path'
-import { BrowserWindow, dialog, ipcMain } from 'electron'
+import { BrowserWindow, dialog, ipcMain, Menu } from 'electron'
 import { Ch } from '../shared/ipc'
 import type { NoteFile, RenameResult, SaveResult, SessionPatch } from '../shared/types'
 import { type AppContext, logSessionError } from './context'
@@ -19,6 +19,7 @@ import {
 import { rfDocumentDir } from './fonts'
 import { setWindowFullScreen } from './fullscreen'
 import { readHeaderTemplate } from './header-template'
+import { noteMenuTemplate } from './menu'
 import { loadUserSnippets } from './snippets'
 
 const str = (v: unknown): string => {
@@ -33,6 +34,11 @@ class SaveConflict extends Error {}
 export function registerIpc(ctx: AppContext): void {
   ipcMain.handle(Ch.startup, () => ctx.startup())
   ipcMain.handle(Ch.listSnippets, () => loadUserSnippets(ctx.settings.snippetFolder))
+  ipcMain.handle(Ch.noteMenu, (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    if (!win) return
+    Menu.buildFromTemplate(noteMenuTemplate((c) => ctx.send(Ch.menu, c))).popup({ window: win })
+  })
   ipcMain.handle(Ch.readHeaderTemplate, () =>
     readHeaderTemplate(rfDocumentDir(process.platform, process.env, homedir())),
   )

@@ -4,6 +4,8 @@ import { fileName } from '../util/path'
 export interface TabBarActions {
   select(index: number): void
   close(id: number): void
+  /** Right click on a tab: select it, then show the note's context menu. */
+  menu(index: number): void
 }
 
 export class TabBar {
@@ -36,6 +38,10 @@ export class TabBar {
           this.actions.close(tab.id)
         })
         item.addEventListener('click', () => this.actions.select(i))
+        item.addEventListener('contextmenu', (e) => {
+          e.preventDefault()
+          this.actions.menu(i)
+        })
         item.addEventListener('auxclick', (e) => {
           if (e.button === 1) this.actions.close(tab.id)
         })

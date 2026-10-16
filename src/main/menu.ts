@@ -213,3 +213,27 @@ export function buildMenuTemplate(d: MenuDeps): MenuItemConstructorOptions[] {
 
   return [...(mac ? [appMenu] : []), file, edit, insert, view, window]
 }
+
+/**
+ * Right-click menu of a note (tab or status line file name). The shortcuts are shown for
+ * reference only; the application menu owns them.
+ */
+export function noteMenuTemplate(command: (c: MenuCommand) => void): MenuItemConstructorOptions[] {
+  const item = (
+    id: MenuCommand,
+    label: string,
+    accelerator: string,
+  ): MenuItemConstructorOptions => ({
+    id,
+    label,
+    accelerator,
+    registerAccelerator: false,
+    click: () => command(id),
+  })
+  return [
+    item('rename', 'Umbenennen …', 'CmdOrCtrl+Shift+R'),
+    item('export', 'PDF exportieren', 'CmdOrCtrl+E'),
+    { type: 'separator' },
+    item('close-tab', 'Tab schließen', 'CmdOrCtrl+W'),
+  ]
+}
