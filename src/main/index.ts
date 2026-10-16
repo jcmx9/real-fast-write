@@ -53,6 +53,8 @@ function run(initial: string[]): void {
   })
 
   void app.whenReady().then(async () => {
+    // macOS shows "Version <app> (<build>)"; both are the package version, so drop the build.
+    app.setAboutPanelOptions({ applicationVersion: app.getVersion(), version: '' })
     await ctx.load()
     handleFontProtocol(ctx.fonts.dir)
     registerIpc(ctx)

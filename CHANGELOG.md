@@ -9,6 +9,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Menu „Einfügen“: rf-document's `header.md` as the YAML header at the top of the note (interim until template sets); the page break moved here from „Bearbeiten“
 
 ### Fixed
+- The macOS About panel shows the version once (no duplicate build number in parentheses)
 - `:header` snippet defaults match rf-document's header.md again (`logo-height: 13mm`, `hard_breaks: true`)
 
 ### Changed
