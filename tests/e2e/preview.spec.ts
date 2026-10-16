@@ -1,4 +1,4 @@
-import { access, copyFile, readFile } from 'node:fs/promises'
+import { access, copyFile, readFile, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { expect } from '@playwright/test'
@@ -131,5 +131,38 @@ test('missing fonts: one notice, editing still works', async () => {
   const { app, page } = await openFixture({ env: { RFD_HOME: empty.root } })
   await expect(page.locator('.panel')).toContainText('Schriften nicht gefunden')
   await expect(page.locator('.cm-editor.rf-preview')).toBeVisible()
+  await app.close()
+})
+
+test('clicks and arrow keys hit the right line below the title block and a table', async () => {
+  const dirs = await makeDirs()
+  const note = join(dirs.notes, 'Zeilen.md')
+  await writeFile(
+    note,
+    '---\ntitle: Titel\nsubtitle: Untertitel\n---\n# Agenda\n1. Erstens\n2. Zweitens\n3. Drittens\n\n|a|b|\n|---|---|\n|1|2|\n\nVorletzte\nEnde\n',
+  )
+  // Zoom 2 as in the reported case: CodeMirror's height map must not drift from the layout.
+  await writeFile(
+    join(dirs.userData, 'session.json'),
+    JSON.stringify({
+      tabs: [{ path: note, headerHidden: true }],
+      activeIndex: 0,
+      view: 'preview',
+      zoom: { edit: 2, present: 1.25 },
+    }),
+  )
+  const { app, page } = await launch({ dirs })
+  await expect(page.locator('.rf-titleblock')).toBeVisible()
+  await page.getByText('Erstens').click()
+  await page.keyboard.press('End')
+  await page.keyboard.press('ArrowDown')
+  await page.keyboard.type('X')
+  await page.getByText('Vorletzte').click()
+  await page.keyboard.press('End')
+  await page.keyboard.type('Y')
+  const text = (await waitForFile(note, (b) => /Y/.test(b.toString()))).toString()
+  const lines = text.split('\n')
+  expect(lines.find((l) => l.includes('X'))).toMatch(/^2\. Zweite/)
+  expect(lines.find((l) => l.includes('Y'))).toBe('VorletzteY')
   await app.close()
 })

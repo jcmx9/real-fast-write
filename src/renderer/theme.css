@@ -294,7 +294,7 @@
 
 /* Table widget (cursor elsewhere): like rf-document's #show table */
 .rf-preview .rf-table-wrap {
-  margin: 1.2em 0 1.4em;
+  padding: 1.2em 0 1.4em;
   overflow-x: auto;
   cursor: text;
 }
@@ -378,7 +378,7 @@
   hyphens: manual;
 }
 .rf-preview .rf-titleblock {
-  margin: 0.2em 0 1.6em;
+  padding: 0.2em 0 1.6em;
   text-align: center;
   cursor: default;
 }
